@@ -165,6 +165,18 @@ def _small(*arrays):
     return all(np.size(x) <= _MAX_ELEMENTS for x in arrays)
 
 
+def _range_ok(*arrays):
+    """All finite values are zero or within ``[1e-100, 1e100]`` in magnitude (squares and ratios stay representable)."""
+    for x in arrays:
+        if x is None:
+            continue
+        a = np.abs(np.asarray(getattr(x, "d", x), dtype=np.float64))
+        a = a[np.isfinite(a) & (a > 0)]
+        if a.size and (a.min() < 1e-100 or a.max() > 1e100):
+            return False
+    return True
+
+
 def _basis_ok(vec):
     """Direction vector usable for an orthonormal triad: finite, nonzero, nonzero components within 1e100 of each other.
 
@@ -175,7 +187,7 @@ def _basis_ok(vec):
     if a.size == 0 or not np.all(np.isfinite(a)):
         return False
     nz = a[a > 0]
-    return nz.size > 0 and float(nz.max() / nz.min()) <= 1e100
+    return nz.size > 0 and float(nz.max() / nz.min()) <= 1e100 and _range_ok(a)
 
 
 # ---------------------------------------------------------------------------
@@ -282,8 +294,8 @@ def check_lookback_time(co, z_i, z_f, result):
 @_guarded
 def check_age_inverse(co, t, a_result):
     """YT-COS-004"""
-    if not _cosmo_ok(co):
-        return
+    if not _cosmo_ok(co) or float(np.min(co.expansion_factor(np.linspace(0.0, 99.0, 1000)) ** 2)) < 1e-4:
+        return  # near-loitering models (E^2 min < 1e-4) exceed the age table's resolution
     a = np.atleast_1d(_a(a_result))
     tt = np.atleast_1d(_val(t, "s") if hasattr(t, "to_value") else _a(t))
     if a.size > 256 or a.size != tt.size:
@@ -320,8 +332,8 @@ def check_age_flat_lcdm(co, a, result):
 @_guarded
 def check_transverse_order(co, z_i, z_f, result):
     """YT-COS-006"""
-    if not _cosmo_ok(co):
-        return
+    if not _cosmo_ok(co) or np.ndim(_a(z_i)) or np.ndim(_a(z_f)):
+        return  # the redshifts are documented as floats
     zz = _zs(z_i, z_f)
     if zz is None or np.any(zz[1] <= zz[0]):
         return
@@ -747,7 +759,7 @@ def check_sph_cyl_consistency(coords, normal, theta):
     from yt.utilities.math_utils import get_cyl_r, get_cyl_z, get_sph_r
 
     c = _a(coords)
-    if not _vec_shape_ok(c) or not _small(c) or not _basis_ok(normal):
+    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(c) or not _basis_ok(normal):
         return
     th = _a(theta)
     r = _a(get_sph_r(c))
@@ -767,7 +779,7 @@ def check_azimuth_equivariance(coords, normal, phi):
 
     c = _a(coords)
     n = _a(normal).astype(np.float64)
-    if not _vec_shape_ok(c) or not _small(c) or not _basis_ok(n):
+    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(c) or not _basis_ok(n):
         return
     n = n / np.linalg.norm(n)
     nb = n.reshape((3,) + (1,) * (c.ndim - 1))
@@ -801,7 +813,7 @@ def check_cyl_parseval(vectors, theta, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not _basis_ok(normal):
+    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(v) or not _basis_ok(normal):
         return
     comps = [
         get_cyl_r_component(vectors, theta, normal),
@@ -821,7 +833,7 @@ def check_sph_parseval(vectors, theta, phi, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not _basis_ok(normal):
+    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(v) or not _basis_ok(normal):
         return
     comps = [
         get_sph_r_component(vectors, theta, phi, normal),
@@ -836,6 +848,8 @@ def check_periodic_dist(a, b, period, periodicity, result):
     """YT-GEO-005"""
     from yt.utilities.math_utils import periodic_dist
 
+    if np.asarray(a).dtype.kind == "u" or np.asarray(b).dtype.kind == "u":
+        return  # unsigned lattice indices: subtraction wraps (integer-dtype convention, not a physical input)
     a, b = np.array(a, dtype=np.float64), np.array(b, dtype=np.float64)
     if a.shape != b.shape or a.ndim < 1 or a.shape[0] != 3 or not _small(a):
         return
@@ -978,7 +992,7 @@ def check_rotate_vector(a, dim, angle, result):
     """YT-ROT-002"""
     v = np.asarray(a, dtype=np.float64)
     out = np.asarray(result, dtype=np.float64)
-    if v.shape != out.shape or v.shape[-1] != 3 or not np.all(np.isfinite(v)):
+    if v.shape != out.shape or v.shape[-1] != 3 or not np.all(np.isfinite(v)) or not _range_ok(v):
         return
     n_in = np.sqrt(np.sum(v**2, axis=-1))
     n_out = np.sqrt(np.sum(out**2, axis=-1))
@@ -1030,7 +1044,7 @@ def check_modify_frame(com, l_in, p_in, v_in, l_out, p_out, v_out):
     l0 = _a(l_in)
     lo = _a(l_out)
     nl = float(np.linalg.norm(l0))
-    if l0.shape != (3,) or not np.isfinite(nl) or nl == 0:
+    if l0.shape != (3,) or not np.isfinite(nl) or nl == 0 or not _range_ok(l0, _a(p_in) if p_in is not None else None, _a(v_in) if v_in is not None else None):
         return
     bad = np.max(np.abs(lo - np.array([0.0, 0.0, nl]))) > 1e-6 * nl
     pc = vv = None
@@ -1087,7 +1101,7 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
     p = _a(p_in)
     v = _a(v_in)
     l0 = _a(l_in)
-    if p.ndim != 2 or p.shape != v.shape or p.shape[1] != 3 or l0.shape != (3,) or not l0.any():
+    if p.ndim != 2 or p.shape != v.shape or p.shape[1] != 3 or l0.shape != (3,) or not l0.any() or not _range_ok(p, v, l0):
         return
     if not _small(p) or p.shape[0] > 20_000:
         return
@@ -1106,6 +1120,8 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
 def check_orientation(orient, snapshot):
     """YT-ORI-001"""
     normal_in, north_in = snapshot
+    if not _range_ok(normal_in, north_in):
+        return
     m = np.asarray(_a(orient.unit_vectors), dtype=np.float64)
     if m.shape != (3, 3) or not np.all(np.isfinite(m)):
         return
@@ -1284,8 +1300,8 @@ def check_spin_dimensionless(result):
     from unyt.dimensions import dimensionless
 
     units = getattr(result, "units", None)
-    if units is None:
-        return
+    if units is None or not np.all(np.isfinite(_a(result))):
+        return  # an empty region gives 0/0
     trigger_if(units.dimensions != dimensionless, "YT-DQ-004")
 
 
@@ -1304,6 +1320,8 @@ def check_profile(profile, fields):
     """YT-PRF-001/002/003"""
     if getattr(profile, "comm", None) is not None and getattr(profile.comm, "size", 1) > 1:
         return
+    if getattr(profile, "deposition", "ngp") != "ngp":
+        return  # cloud-in-cell spills mass past the outer bins by construction
     bins = _profile_bins(profile)
     if not bins or len(bins) != len(profile.bin_fields):
         return
