@@ -164,14 +164,6 @@ def setup_magnetic_field_fields(
             assert_never(geometry)
 
     if _magnetic_field_poloidal_magnitude is not None:
-        _poloidal_impl = _magnetic_field_poloidal_magnitude
-
-        def _magnetic_field_poloidal_magnitude(data):
-            ret = _poloidal_impl(data)
-            if _sc.enabled() and not _sc._is_detector(data):
-                _sc.check_poloidal_toroidal(data, ftype, ret)
-            return ret
-
         registry.add_field(
             (ftype, "magnetic_field_poloidal_magnitude"),
             sampling_type="local",

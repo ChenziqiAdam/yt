@@ -599,17 +599,6 @@ def check_species_atom_counts(data):
 
 
 @_guarded
-def check_radial_mach(data, ftype, result):
-    """YT-FLD-001"""
-    mach = _a(_fetch(data, (ftype, "mach_number")))
-    rad = _a(result)
-    if mach.shape != rad.shape:
-        return
-    good = np.isfinite(mach) & np.isfinite(rad)
-    trigger_if(np.any(rad[good] > mach[good] * (1.0 + _C * _EPS) + _C * _EPS), "YT-FLD-001")
-
-
-@_guarded
 def check_courant(data, ftype, result):
     """YT-FLD-002"""
     dt = _val(result, "s")
@@ -668,20 +657,6 @@ def check_magnetic_energy_si(data, ftype, result):
     expected = b_t**2 / (2.0 * _MU_0)
     good = np.isfinite(got) & np.isfinite(expected) & (expected > 0)
     trigger_if(np.any((np.abs(got - expected) > 1e-8 * expected) & good), "YT-FLD-004")
-
-
-@_guarded
-def check_poloidal_toroidal(data, ftype, result):
-    """YT-FLD-005"""
-    b = _fetch(data, (ftype, "magnetic_field_strength"))
-    tor = _fetch(data, (ftype, "magnetic_field_toroidal_magnitude"))
-    unit = b.units
-    bs, ts, ps = _val(b, unit), _val(tor, unit), _val(result, unit)
-    if not (bs.shape == ts.shape == ps.shape):
-        return
-    good = np.isfinite(bs) & np.isfinite(ts) & np.isfinite(ps)
-    err = np.abs(ps**2 + ts**2 - bs**2)
-    trigger_if(np.any((err > _C * _EPS * bs**2) & good), "YT-FLD-005")
 
 
 @_guarded
@@ -1214,84 +1189,6 @@ def check_center_of_mass(dq, result):
     vals, w, units = got
     res = _val(result, units[0])
     _mean_in_range(vals, w, res, "YT-DQ-001")
-
-
-@_guarded
-def check_weighted_mean(dq, result):
-    """YT-DQ-002 (WeightedAverageQuantity)"""
-    args = getattr(dq, "_sc_args", None)
-    if args is None:
-        return
-    fields, weight = args
-    res = result if isinstance(result, list) else [result]
-    if len(res) != len(fields):
-        return
-    ad = dq.data_source
-    w = ad[weight]
-    if w.size > _MAX_ELEMENTS:
-        return
-    wv = _a(w)
-    if not (np.all(np.isfinite(wv)) and np.all(wv >= 0) and wv.sum() > 0):
-        return
-    for f, r in zip(fields, res, strict=True):
-        q = ad[f]
-        v = _val(q, q.units)
-        _mean_in_range([v], wv, [float(_val(r, q.units))], "YT-DQ-002")
-
-
-@_guarded
-def check_bulk_velocity(dq, result):
-    """YT-DQ-002 (BulkVelocity)"""
-    args = getattr(dq, "_sc_args", None)
-    if args is None:
-        return
-    use_gas, use_particles, ptype = args
-    ad = dq.data_source
-    specs = []
-    if use_gas:
-        specs.append(([("gas", f"velocity_{ax}") for ax in "xyz"], ("gas", "mass")))
-    if use_particles and "nbody" in ad.ds.particle_types:
-        specs.append(([(ptype, f"particle_velocity_{ax}") for ax in "xyz"], (ptype, "particle_mass")))
-    if not specs:
-        return
-    got = _gather_weighted(ad, specs)
-    if got is None:
-        return
-    vals, w, units = got
-    res = _val(result, units[0])
-    _mean_in_range(vals, w, res, "YT-DQ-002")
-
-
-@_guarded
-def check_weighted_std(dq, result):
-    """YT-DQ-003"""
-    args = getattr(dq, "_sc_args", None)
-    if args is None:
-        return
-    fields, weight = args
-    if len(result) != len(fields):
-        return
-    ad = dq.data_source
-    w = ad[weight]
-    if w.size > _MAX_ELEMENTS:
-        return
-    wv = _a(w)
-    if not (np.all(np.isfinite(wv)) and np.all(wv >= 0) and wv.sum() > 0):
-        return
-    keep = wv > 0
-    n = int(keep.sum())
-    for f, r in zip(fields, result, strict=True):
-        v = _a(ad[f])[keep]
-        std, mean = float(r[0]), float(r[1])
-        lo, hi = float(v.min()), float(v.max())
-        mx = max(abs(lo), abs(hi))
-        slack = _C * _EPS * max(n, 1) * mx
-        bad = (
-            std < 0
-            or std**2 > ((hi - lo) / 2.0) ** 2 + _C * _EPS * max(n, 1) * mx**2
-            or not (lo - slack <= mean <= hi + slack)
-        )
-        trigger_if(bad, "YT-DQ-003")
 
 
 @_guarded

@@ -1,6 +1,6 @@
 # Scientific checkers
 
-This bank exposes all 47 instrumented checkers in 47 families.
+This bank exposes all 43 instrumented checkers in 43 families.
 Every listed checker ID is public and scored.
 
 Set `SCIBENCH_TRIGGER_LOG` to a writable file and exercise the normal

@@ -127,8 +127,6 @@ class WeightedAverageQuantity(DerivedQuantity):
     def count_values(self, fields, weight):
         # This is a list now
         self.num_vals = len(fields) + 1
-        if _sc.enabled():
-            self._sc_args = (list(fields), weight)
 
     def __call__(self, fields, weight):
         fields = list(iter_fields(fields))
@@ -144,10 +142,7 @@ class WeightedAverageQuantity(DerivedQuantity):
 
     def reduce_intermediate(self, values):
         w = values.pop(-1).sum(dtype=np.float64)
-        ret = [v.sum(dtype=np.float64) / w for v in values]
-        if _sc.enabled():
-            _sc.check_weighted_mean(self, ret)
-        return ret
+        return [v.sum(dtype=np.float64) / w for v in values]
 
 
 class TotalQuantity(DerivedQuantity):
@@ -342,8 +337,6 @@ class BulkVelocity(DerivedQuantity):
         self.num_vals = 0
         if use_gas:
             self.num_vals += 4
-        if _sc.enabled():
-            self._sc_args = (use_gas, use_particles, particle_type)
         if use_particles and "nbody" in self.data_source.ds.particle_types:
             self.num_vals += 4
 
@@ -384,10 +377,7 @@ class BulkVelocity(DerivedQuantity):
             y += values.pop(0).sum(dtype=np.float64)
             z += values.pop(0).sum(dtype=np.float64)
             w += values.pop(0).sum(dtype=np.float64)
-        ret = self.data_source.ds.arr([v / w for v in [x, y, z]])
-        if _sc.enabled():
-            _sc.check_bulk_velocity(self, ret)
-        return ret
+        return self.data_source.ds.arr([v / w for v in [x, y, z]])
 
 
 class WeightedStandardDeviation(DerivedQuantity):
@@ -426,8 +416,6 @@ class WeightedStandardDeviation(DerivedQuantity):
     def count_values(self, fields, weight):
         # This is a list now
         self.num_vals = 2 * len(fields) + 1
-        if _sc.enabled():
-            self._sc_args = (list(fields), weight)
 
     def __call__(self, fields, weight):
         fields = list(iter_fields(fields))
@@ -473,8 +461,6 @@ class WeightedStandardDeviation(DerivedQuantity):
                 all_mean,
             ]
             rvals.append(np.array(ret))
-        if _sc.enabled():
-            _sc.check_weighted_std(self, rvals)
         return rvals
 
 

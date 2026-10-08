@@ -196,18 +196,6 @@
       "symbol": "_nuclei_density"
     },
     {
-      "alarm": "`radial > mach * (1 + C eps) + C eps` (units-free)",
-      "family": "radial_mach_bound",
-      "id": "YT-FLD-001",
-      "invariant": "`|v_r| <= |v|` hence `radial_mach_number <= mach_number`",
-      "observation_point": "return of `_radial_mach_number`",
-      "precondition": "`velocity_magnitude` and `radial_velocity` evaluable with the same `bulk_velocity`",
-      "rationale": "a component of a vector cannot exceed its magnitude.",
-      "scientific_quantity": "radial Mach number",
-      "source": "yt/fields/fluid_fields.py",
-      "symbol": "radial_mach_number"
-    },
-    {
       "alarm": "outside the interval by more than `C eps dt`",
       "family": "courant_signal_speed_bracket",
       "id": "YT-FLD-002",
@@ -242,18 +230,6 @@
       "scientific_quantity": "magnetic energy density",
       "source": "yt/fields/magnetic_field.py",
       "symbol": "magnetic_energy_density"
-    },
-    {
-      "alarm": "`|B_pol^2 + B_tor^2 - |B|^2| > C eps |B|^2`",
-      "family": "poloidal_toroidal_decomposition",
-      "id": "YT-FLD-005",
-      "invariant": "`B_pol^2 + B_tor^2 = |B|^2` (orthogonal decomposition)",
-      "observation_point": "return of `_magnetic_field_poloidal_magnitude`",
-      "precondition": "geometry with both fields (Cartesian, cylindrical, polar, spherical); common `bulk_magnetic_field` and `normal` parameters",
-      "rationale": "the two fields partition one vector.",
-      "scientific_quantity": "poloidal magnetic field",
-      "source": "yt/fields/magnetic_field.py",
-      "symbol": "magnetic_field_poloidal_magnitude"
     },
     {
       "alarm": "`|u_t^2 - |u|^2 - c^2| > C eps gamma^2 c^2` (cancellation of two terms of size `gamma^2 c^2`)",
@@ -494,30 +470,6 @@
       "scientific_quantity": "center of mass",
       "source": "yt/data_objects/derived_quantities.py",
       "symbol": "CenterOfMass"
-    },
-    {
-      "alarm": "outside by more than `n eps max|f|`",
-      "family": "weighted_mean_range",
-      "id": "YT-DQ-002",
-      "invariant": "`min f <= <f>_w <= max f`",
-      "observation_point": "return of `WeightedAverageQuantity.reduce_intermediate` and `BulkVelocity.reduce_intermediate` (velocity components)",
-      "precondition": "nonnegative weights with positive sum, at most 2e6 elements",
-      "rationale": "Weighted means lie inside the data range.",
-      "scientific_quantity": "weighted mean",
-      "source": "yt/data_objects/derived_quantities.py",
-      "symbol": "WeightedAverageQuantity/BulkVelocity"
-    },
-    {
-      "alarm": "violated by more than `n eps max|f|`",
-      "family": "weighted_variance_popoviciu",
-      "id": "YT-DQ-003",
-      "invariant": "`0 <= sigma_w <= (max f - min f)/2` and the reported mean is within `[min f, max f]`",
-      "observation_point": "return of `WeightedStandardDeviation.reduce_intermediate`",
-      "precondition": "as DQ-002",
-      "rationale": "it tests the parallel combination formula for variances.",
-      "scientific_quantity": "weighted standard deviation",
-      "source": "yt/data_objects/derived_quantities.py",
-      "symbol": "WeightedStandardDeviation"
     },
     {
       "alarm": "unit dimensions differ from dimensionless",

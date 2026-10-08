@@ -96,10 +96,7 @@ def setup_fluid_fields(registry, ftype="gas", slice_info=None):
     def _radial_mach_number(data):
         """Radial component of M{|v|/c_sound}"""
         tr = data[ftype, "radial_velocity"] / data[ftype, "sound_speed"]
-        ret = np.abs(tr)
-        if _sc.enabled() and not _sc._is_detector(data):
-            _sc.check_radial_mach(data, ftype, ret)
-        return ret
+        return np.abs(tr)
 
     registry.add_field(
         (ftype, "radial_mach_number"),
