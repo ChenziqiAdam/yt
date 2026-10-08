@@ -294,7 +294,7 @@ def check_lookback_time(co, z_i, z_f, result):
 @_guarded
 def check_age_inverse(co, t, a_result):
     """YT-COS-004"""
-    if not _cosmo_ok(co) or float(np.min(co.expansion_factor(np.linspace(0.0, 99.0, 1000)) ** 2)) < 1e-4:
+    if not _cosmo_ok(co) or float(np.min(co.expansion_factor(np.expm1(np.linspace(0.0, math.log(100.0), 20001))) ** 2)) < 1e-4:
         return  # near-loitering models (E^2 min < 1e-4) exceed the age table's resolution
     a = np.atleast_1d(_a(a_result))
     tt = np.atleast_1d(_val(t, "s") if hasattr(t, "to_value") else _a(t))
