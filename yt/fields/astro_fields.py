@@ -1,5 +1,7 @@
 import numpy as np
 
+from yt.utilities import _scientific_checkers as _sc
+
 from .derived_field import ValidateParameter
 from .field_plugin_registry import register_field_plugin
 from .vector_operations import create_magnitude_field
@@ -84,7 +86,10 @@ def setup_astro_fields(registry, ftype="gas", slice_info=None):
     )
 
     def _optical_depth(data):
-        return data[ftype, "El_number_density"] * pc.sigma_thompson
+        ret = data[ftype, "El_number_density"] * pc.sigma_thompson
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_thomson(pc.sigma_thompson.to_value("cm**2"))
+        return ret
 
     registry.add_field(
         (ftype, "optical_depth"),
@@ -155,7 +160,10 @@ def setup_astro_fields(registry, ftype="gas", slice_info=None):
 
     # 4-velocity t-component
     def _four_velocity_t(data):
-        return data["gas", "lorentz_factor"] * pc.clight
+        ret = data["gas", "lorentz_factor"] * pc.clight
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_four_velocity(data, ret)
+        return ret
 
     registry.add_field(
         ("gas", "four_velocity_t"),

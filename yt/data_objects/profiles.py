@@ -7,6 +7,7 @@ from yt.frontends.ytdata.utilities import save_as_dataset
 from yt.funcs import get_output_filename, is_sequence, iter_fields, mylog
 from yt.units.unit_object import Unit  # type: ignore
 from yt.units.yt_array import YTQuantity, array_like_field
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.exceptions import (
     YTIllDefinedBounds,
     YTIllDefinedProfile,
@@ -211,6 +212,9 @@ class ProfileND(ParallelAnalysisInterface):
                 self.field_map[field[1]] = field
             else:
                 self.field_map[field] = field
+
+        if _sc.enabled():
+            _sc.check_profile(self, list(fields))
 
     def _bin_chunk(self, chunk, fields, storage):
         raise NotImplementedError

@@ -1,5 +1,6 @@
 import re
 
+from . import _scientific_checkers as _sc
 from .periodic_table import periodic_table
 from .physical_ratios import _primordial_mass_fraction
 
@@ -44,4 +45,7 @@ def compute_mu(ion_state):
         n_He = 1.0  # neutral helium gives one particle
     muinv = n_H * _primordial_mass_fraction["H"] / ChemicalFormula("H").weight
     muinv += n_He * _primordial_mass_fraction["He"] / ChemicalFormula("He").weight
-    return 1.0 / muinv
+    ret = 1.0 / muinv
+    if _sc.enabled():
+        _sc.check_mu_bounds(ion_state, ret)
+    return ret

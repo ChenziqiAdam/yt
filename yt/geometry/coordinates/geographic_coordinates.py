@@ -1,6 +1,8 @@
 import numpy as np
 import unyt
 
+from yt.utilities import _scientific_checkers as _sc
+
 from yt.utilities.lib.pixelization_routines import pixelize_cartesian, pixelize_cylinder
 
 from .coordinate_handler import (
@@ -88,6 +90,10 @@ class GeographicCoordinateHandler(CoordinateHandler):
             vol = ((r + 0.5 * dr) ** 3 - (r - 0.5 * dr) ** 3) / 3.0
             vol *= np.cos(theta - 0.5 * dtheta) - np.cos(theta + 0.5 * dtheta)
             vol *= data["index", "dphi"]
+            if _sc.enabled() and not _sc._is_detector(data):
+                _sc.check_spherical_volume(
+                    r, dr, theta, dtheta, data["index", "dphi"], vol, "YT-GEO-010"
+                )
             return vol
 
         registry.add_field(

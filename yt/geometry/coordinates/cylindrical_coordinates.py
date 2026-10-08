@@ -2,6 +2,7 @@ from functools import cached_property
 
 import numpy as np
 
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.lib.pixelization_routines import pixelize_cartesian, pixelize_cylinder
 
 from .coordinate_handler import (
@@ -58,6 +59,10 @@ class CylindricalCoordinateHandler(CoordinateHandler):
             vol = 0.5 * ((r + 0.5 * dr) ** 2 - (r - 0.5 * dr) ** 2)
             vol *= data["index", "dtheta"]
             vol *= data["index", "dz"]
+            if _sc.enabled() and not _sc._is_detector(data):
+                _sc.check_cylindrical_volume(
+                    r, dr, data["index", "dtheta"], data["index", "dz"], vol
+                )
             return vol
 
         registry.add_field(

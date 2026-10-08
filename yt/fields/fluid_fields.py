@@ -2,6 +2,7 @@ import numpy as np
 
 from yt.units.dimensions import current_mks
 from yt.units.unit_object import Unit  # type: ignore
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.chemical_formulas import compute_mu
 from yt.utilities.lib.misc_utilities import obtain_relative_velocity_vector
 
@@ -95,7 +96,10 @@ def setup_fluid_fields(registry, ftype="gas", slice_info=None):
     def _radial_mach_number(data):
         """Radial component of M{|v|/c_sound}"""
         tr = data[ftype, "radial_velocity"] / data[ftype, "sound_speed"]
-        return np.abs(tr)
+        ret = np.abs(tr)
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_radial_mach(data, ftype, ret)
+        return ret
 
     registry.add_field(
         (ftype, "radial_mach_number"),
@@ -135,6 +139,8 @@ def setup_fluid_fields(registry, ftype="gas", slice_info=None):
             data[ftype, "sound_speed"] + np.abs(data[ftype, "velocity_z"])
         )
         tr = np.minimum(np.minimum(t1, t2), t3)
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_courant(data, ftype, tr)
         return tr
 
     registry.add_field(
@@ -159,7 +165,10 @@ def setup_fluid_fields(registry, ftype="gas", slice_info=None):
     )
 
     def _kT(data):
-        return (pc.kboltz * data[ftype, "temperature"]).in_units("keV")
+        ret = (pc.kboltz * data[ftype, "temperature"]).in_units("keV")
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_kt(data[ftype, "temperature"], ret)
+        return ret
 
     registry.add_field(
         (ftype, "kT"),

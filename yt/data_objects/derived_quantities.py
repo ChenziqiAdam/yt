@@ -2,6 +2,7 @@ import numpy as np
 
 from yt.funcs import camelcase_to_underscore, iter_fields
 from yt.units.yt_array import array_like_field
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.exceptions import YTParticleTypeNotFound
 from yt.utilities.object_registries import derived_quantity_registry
 from yt.utilities.parallel_tools.parallel_analysis_interface import (
@@ -126,6 +127,8 @@ class WeightedAverageQuantity(DerivedQuantity):
     def count_values(self, fields, weight):
         # This is a list now
         self.num_vals = len(fields) + 1
+        if _sc.enabled():
+            self._sc_args = (list(fields), weight)
 
     def __call__(self, fields, weight):
         fields = list(iter_fields(fields))
@@ -141,7 +144,10 @@ class WeightedAverageQuantity(DerivedQuantity):
 
     def reduce_intermediate(self, values):
         w = values.pop(-1).sum(dtype=np.float64)
-        return [v.sum(dtype=np.float64) / w for v in values]
+        ret = [v.sum(dtype=np.float64) / w for v in values]
+        if _sc.enabled():
+            _sc.check_weighted_mean(self, ret)
+        return ret
 
 
 class TotalQuantity(DerivedQuantity):
@@ -248,6 +254,8 @@ class CenterOfMass(DerivedQuantity):
 
         self.use_gas = use_gas & includes_gas
         self.use_particles = use_particles & includes_particles
+        if _sc.enabled():
+            self._sc_args = (use_gas, use_particles, particle_type)
 
         self.num_vals = 0
         if self.use_gas:
@@ -290,7 +298,10 @@ class CenterOfMass(DerivedQuantity):
             y += values.pop(0).sum(dtype=np.float64)
             z += values.pop(0).sum(dtype=np.float64)
             w += values.pop(0).sum(dtype=np.float64)
-        return self.data_source.ds.arr([v / w for v in [x, y, z]])
+        ret = self.data_source.ds.arr([v / w for v in [x, y, z]])
+        if _sc.enabled():
+            _sc.check_center_of_mass(self, ret)
+        return ret
 
 
 class BulkVelocity(DerivedQuantity):
@@ -331,6 +342,8 @@ class BulkVelocity(DerivedQuantity):
         self.num_vals = 0
         if use_gas:
             self.num_vals += 4
+        if _sc.enabled():
+            self._sc_args = (use_gas, use_particles, particle_type)
         if use_particles and "nbody" in self.data_source.ds.particle_types:
             self.num_vals += 4
 
@@ -371,7 +384,10 @@ class BulkVelocity(DerivedQuantity):
             y += values.pop(0).sum(dtype=np.float64)
             z += values.pop(0).sum(dtype=np.float64)
             w += values.pop(0).sum(dtype=np.float64)
-        return self.data_source.ds.arr([v / w for v in [x, y, z]])
+        ret = self.data_source.ds.arr([v / w for v in [x, y, z]])
+        if _sc.enabled():
+            _sc.check_bulk_velocity(self, ret)
+        return ret
 
 
 class WeightedStandardDeviation(DerivedQuantity):
@@ -410,6 +426,8 @@ class WeightedStandardDeviation(DerivedQuantity):
     def count_values(self, fields, weight):
         # This is a list now
         self.num_vals = 2 * len(fields) + 1
+        if _sc.enabled():
+            self._sc_args = (list(fields), weight)
 
     def __call__(self, fields, weight):
         fields = list(iter_fields(fields))
@@ -455,6 +473,8 @@ class WeightedStandardDeviation(DerivedQuantity):
                 all_mean,
             ]
             rvals.append(np.array(ret))
+        if _sc.enabled():
+            _sc.check_weighted_std(self, rvals)
         return rvals
 
 
@@ -839,4 +859,7 @@ class SpinParameter(DerivedQuantity):
         e = values.pop(0).sum(dtype=np.float64)
         j = values.pop(0).sum(dtype=np.float64)
         m = values.pop(0).sum(dtype=np.float64)
-        return j * np.sqrt(np.abs(e)) / m**2.5 / gravitational_constant_cgs
+        ret = j * np.sqrt(np.abs(e)) / m**2.5 / gravitational_constant_cgs
+        if _sc.enabled():
+            _sc.check_spin_dimensionless(ret)
+        return ret

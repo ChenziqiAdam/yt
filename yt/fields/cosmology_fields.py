@@ -1,3 +1,5 @@
+from yt.utilities import _scientific_checkers as _sc
+
 from .derived_field import ValidateParameter
 from .field_exceptions import NeedsConfiguration, NeedsParameter
 from .field_plugin_registry import register_field_plugin
@@ -93,12 +95,15 @@ def setup_cosmology_fields(registry, ftype="gas", slice_info=None):
         co = data.ds.cosmology
         # critical_density(z) ~ omega_lambda + omega_matter * (1 + z)^3
         # mean density(z) ~ omega_matter * (1 + z)^3
-        return (
+        ret = (
             data[ftype, "matter_density"]
             / data.ds.omega_matter
             / co.critical_density(0.0)
             / (1.0 + data.ds.current_redshift) ** 3
         )
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_overdensity_normalization(data, ftype, ret)
+        return ret
 
     registry.add_field(
         (ftype, "matter_overdensity"),

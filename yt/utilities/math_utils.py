@@ -3,6 +3,7 @@ import math
 import numpy as np
 
 from yt.units.yt_array import YTArray
+from yt.utilities import _scientific_checkers as _sc
 
 prec_accum = {
     int: np.int64,
@@ -62,7 +63,10 @@ def periodic_position(pos, ds):
     """
 
     off = (pos - ds.domain_left_edge) % ds.domain_width
-    return ds.domain_left_edge + off
+    ret = ds.domain_left_edge + off
+    if _sc.enabled():
+        _sc.check_periodic_position(pos, ds, ret)
+    return ret
 
 
 def periodic_dist(a, b, period, periodicity=(True, True, True)):
@@ -98,6 +102,8 @@ def periodic_dist(a, b, period, periodicity=(True, True, True)):
     """
     a = np.array(a)
     b = np.array(b)
+    _sc_in = (a.copy(), b.copy()) if _sc.enabled() else None
+    period_in = period
     period = np.array(period)
 
     if period.size == 1:
@@ -127,8 +133,12 @@ def periodic_dist(a, b, period, periodicity=(True, True, True)):
     d = np.amin(c, axis=0) ** 2
     r2 = d.sum(axis=0)
     if r2.size == 1:
-        return np.sqrt(r2[0, 0])
-    return np.sqrt(r2)
+        ret = np.sqrt(r2[0, 0])
+    else:
+        ret = np.sqrt(r2)
+    if _sc.enabled():
+        _sc.check_periodic_dist(_sc_in[0], _sc_in[1], period_in, periodicity, ret)
+    return ret
 
 
 def periodic_ray(start, end, left=None, right=None):
@@ -333,9 +343,24 @@ def rotate_vector_3D(a, dim, angle):
     else:
         raise ValueError("dim must be 0, 1, or 2!")
     if mod:
-        return np.dot(R, a.T).T[0]
+        ret = np.dot(R, a.T).T[0]
     else:
-        return np.dot(R, a.T).T
+        ret = np.dot(R, a.T).T
+    if _sc.enabled():
+        _sc.check_rotate_vector(a[0] if mod else a, dim, angle, ret)
+    return ret
+
+
+def _frame_result(sc_in, L, P, V):
+    if V is None and P is not None:
+        ret = (L, P)
+    elif P is None and V is not None:
+        ret = (L, V)
+    else:
+        ret = (L, P, V)
+    if sc_in is not None and _sc.enabled():
+        _sc.check_modify_frame(*sc_in, L, P, V)
+    return ret
 
 
 def modify_reference_frame(CoM, L, P=None, V=None):
@@ -401,6 +426,7 @@ def modify_reference_frame(CoM, L, P=None, V=None):
            [  0.00000000e+00,   0.00000000e+00,   0.00000000e+00]])
 
     """
+    _sc_in = (CoM, L, P, V) if _sc.enabled() else None
     # First translate the positions to center of mass reference frame.
     if P is not None:
         P = P - CoM
@@ -418,12 +444,7 @@ def modify_reference_frame(CoM, L, P=None, V=None):
                 V = -V
 
         # return the values
-        if V is None and P is not None:
-            return L, P
-        elif P is None and V is not None:
-            return L, V
-        else:
-            return L, P, V
+        return _frame_result(_sc_in, L, P, V)
 
     # Normal vector is not aligned with simulation Z axis
     # Therefore we are going to have to apply a rotation
@@ -450,12 +471,7 @@ def modify_reference_frame(CoM, L, P=None, V=None):
     L = rotate_vector_3D(L, 1, theta)
 
     # return the values
-    if V is None and P is not None:
-        return L, P
-    elif P is None and V is not None:
-        return L, V
-    else:
-        return L, P, V
+    return _frame_result(_sc_in, L, P, V)
 
 
 def compute_rotational_velocity(CoM, L, P, V):
@@ -502,6 +518,7 @@ def compute_rotational_velocity(CoM, L, P, V):
 
     """
     # First we translate into the simple coordinates.
+    L_in, P_in, V_in = L, P, V
     L, P, V = modify_reference_frame(CoM, L, P, V)
     # Find the vector in the plane of the galaxy for each position point
     # that is perpendicular to the radial vector.
@@ -512,6 +529,8 @@ def compute_rotational_velocity(CoM, L, P, V):
     for i, rp in enumerate(radperp):
         temp = np.dot(rp, V[i]) / np.dot(rp, rp) * rp
         res[i] = np.dot(temp, temp) ** 0.5
+    if _sc.enabled():
+        _sc.check_velocity_decomposition(CoM, L_in, P_in, V_in)
     return res
 
 
@@ -605,6 +624,7 @@ def compute_radial_velocity(CoM, L, P, V):
 
     """
     # First we translate into the simple coordinates.
+    L_in, P_in, V_in = L, P, V
     L, P, V = modify_reference_frame(CoM, L, P, V)
     # We find the tangential velocity by dotting the velocity vector
     # with the cylindrical radial vector for this point.
@@ -614,6 +634,8 @@ def compute_radial_velocity(CoM, L, P, V):
     for i, rad in enumerate(P):
         temp = np.dot(rad, V[i]) / np.dot(rad, rad) * rad
         res[i] = np.dot(temp, temp) ** 0.5
+    if _sc.enabled():
+        _sc.check_velocity_decomposition(CoM, L_in, P_in, V_in)
     return res
 
 
@@ -746,6 +768,7 @@ def ortho_find(vec1):
     array([-0.16903085,  0.84515425, -0.50709255])
     """
     vec1 = np.array(vec1, dtype=np.float64)
+    vec_in = vec1.copy() if _sc.enabled() else None
     # Normalize
     norm = np.sqrt(np.vdot(vec1, vec1))
     if norm == 0:
@@ -772,6 +795,8 @@ def ortho_find(vec1):
     vec2 = np.array([x2, y2, z2])
     vec2 /= norm2
     vec3 = np.cross(vec1, vec2)
+    if _sc.enabled():
+        _sc.check_ortho_find(vec_in, (vec1, vec2, vec3))
     return vec1, vec2, vec3
 
 
@@ -1204,6 +1229,8 @@ def get_rotation_matrix(theta, rot_vector):
         ]
     )
 
+    if _sc.enabled():
+        _sc.check_rotation_matrix(theta, rot_vector, R)
     return R
 
 
@@ -1252,6 +1279,8 @@ def quaternion_to_rotation_matrix(quaternion):
     R[2][1] = 2.0 * y * z - 2.0 * w * x
     R[2][2] = 1.0 - 2.0 * x**2 - 2.0 * y**2
 
+    if _sc.enabled():
+        _sc.check_quat_to_matrix(quaternion, R)
     return R
 
 
@@ -1316,7 +1345,10 @@ def rotation_matrix_to_quaternion(rot_matrix):
         x = (m31 + m13) * mult
         y = (m23 + m32) * mult
 
-    return np.array([w, x, y, z])
+    ret = np.array([w, x, y, z])
+    if _sc.enabled():
+        _sc.check_matrix_to_quat(rot_matrix, ret)
+    return ret
 
 
 def get_sph_r(coords):
@@ -1366,6 +1398,8 @@ def get_sph_theta(coords, normal):
 
     ret[np.isnan(ret)] = 0
 
+    if _sc.enabled():
+        _sc.check_sph_cyl_consistency(coords, normal, ret)
     return ret
 
 
@@ -1380,6 +1414,7 @@ def get_sph_phi(coords, normal):
     # yprime-component and the xprime-component of the coordinate
     # vector.
 
+    normal_in = normal
     normal = normalize_vector(normal)
     (zprime, xprime, yprime) = ortho_find(normal)
 
@@ -1393,7 +1428,10 @@ def get_sph_phi(coords, normal):
     Px = np.sum(Jx * coords, axis=0)
     Py = np.sum(Jy * coords, axis=0)
 
-    return np.arctan2(Py, Px)
+    ret = np.arctan2(Py, Px)
+    if _sc.enabled():
+        _sc.check_azimuth_equivariance(coords, normal_in, ret)
+    return ret
 
 
 def get_cyl_r(coords, normal):
@@ -1444,7 +1482,10 @@ def get_cyl_r_component(vectors, theta, normal):
 
     rhat = Jx * np.cos(theta) + Jy * np.sin(theta)
 
-    return np.sum(vectors * rhat, axis=0)
+    ret = np.sum(vectors * rhat, axis=0)
+    if _sc.enabled():
+        _sc.check_cyl_parseval(vectors, theta, normal)
+    return ret
 
 
 def get_cyl_theta_component(vectors, theta, normal):
@@ -1461,7 +1502,10 @@ def get_cyl_theta_component(vectors, theta, normal):
 
     thetahat = -Jx * np.sin(theta) + Jy * np.cos(theta)
 
-    return np.sum(vectors * thetahat, axis=0)
+    ret = np.sum(vectors * thetahat, axis=0)
+    if _sc.enabled():
+        _sc.check_cyl_parseval(vectors, theta, normal)
+    return ret
 
 
 def get_cyl_z_component(vectors, normal):
@@ -1474,7 +1518,10 @@ def get_cyl_z_component(vectors, normal):
     tile_shape = [1] + list(vectors.shape)[1:]
     zhat = np.tile(res_zprime, tile_shape)
 
-    return np.sum(vectors * zhat, axis=0)
+    ret = np.sum(vectors * zhat, axis=0)
+    if _sc.enabled():
+        _sc.check_cyl_parseval(vectors, np.zeros(vectors.shape[1:]), normal)
+    return ret
 
 
 def get_sph_r_component(vectors, theta, phi, normal):
@@ -1499,7 +1546,10 @@ def get_sph_r_component(vectors, theta, phi, normal):
         + Jz * np.cos(theta)
     )
 
-    return np.sum(vectors * rhat, axis=0)
+    ret = np.sum(vectors * rhat, axis=0)
+    if _sc.enabled():
+        _sc.check_sph_parseval(vectors, theta, phi, normal)
+    return ret
 
 
 def get_sph_phi_component(vectors, phi, normal):
@@ -1516,7 +1566,10 @@ def get_sph_phi_component(vectors, phi, normal):
 
     phihat = -Jx * np.sin(phi) + Jy * np.cos(phi)
 
-    return np.sum(vectors * phihat, axis=0)
+    ret = np.sum(vectors * phihat, axis=0)
+    if _sc.enabled():
+        _sc.check_sph_parseval(vectors, np.zeros(vectors.shape[1:]), phi, normal)
+    return ret
 
 
 def get_sph_theta_component(vectors, theta, phi, normal):
@@ -1540,7 +1593,10 @@ def get_sph_theta_component(vectors, theta, phi, normal):
         - Jz * np.sin(theta)
     )
 
-    return np.sum(vectors * thetahat, axis=0)
+    ret = np.sum(vectors * thetahat, axis=0)
+    if _sc.enabled():
+        _sc.check_sph_parseval(vectors, theta, phi, normal)
+    return ret
 
 
 def compute_stddev_image(buff2, buff):

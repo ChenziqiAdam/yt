@@ -7,6 +7,7 @@ from yt.fields.derived_field import ValidateParameter
 from yt.fields.field_info_container import FieldInfoContainer
 from yt.geometry.api import Geometry
 from yt.units import dimensions
+from yt.utilities import _scientific_checkers as _sc
 
 from .field_plugin_registry import register_field_plugin
 
@@ -68,7 +69,10 @@ def setup_magnetic_field_fields(
 
     def _magnetic_energy_density(data):
         B = data[ftype, "magnetic_field_strength"]
-        return 0.5 * B * B / mag_factors(B.units.dimensions)
+        ret = 0.5 * B * B / mag_factors(B.units.dimensions)
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_magnetic_energy_si(data, ftype, ret)
+        return ret
 
     registry.add_field(
         (ftype, "magnetic_energy_density"),
@@ -160,6 +164,14 @@ def setup_magnetic_field_fields(
             assert_never(geometry)
 
     if _magnetic_field_poloidal_magnitude is not None:
+        _poloidal_impl = _magnetic_field_poloidal_magnitude
+
+        def _magnetic_field_poloidal_magnitude(data):
+            ret = _poloidal_impl(data)
+            if _sc.enabled() and not _sc._is_detector(data):
+                _sc.check_poloidal_toroidal(data, ftype, ret)
+            return ret
+
         registry.add_field(
             (ftype, "magnetic_field_poloidal_magnitude"),
             sampling_type="local",
@@ -217,7 +229,10 @@ def setup_magnetic_field_fields(
 
     def _alfven_speed(data):
         B = data[ftype, "magnetic_field_strength"]
-        return B / np.sqrt(mag_factors(B.units.dimensions) * data[ftype, "density"])
+        ret = B / np.sqrt(mag_factors(B.units.dimensions) * data[ftype, "density"])
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_alfven_si(data, ftype, ret)
+        return ret
 
     registry.add_field(
         (ftype, "alfven_speed"),
@@ -245,11 +260,16 @@ def setup_magnetic_field_fields(
     rm_units = registry.ds.quan(1.0, "rad/m**2").units / unit_system["length"]
 
     def _rotation_measure(data):
-        return (
+        ret = (
             rm_scale
             * data[ftype, "magnetic_field_los"]
             * data[ftype, "El_number_density"]
         )
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_rotation_measure(
+                data[ftype, "magnetic_field_los"], data[ftype, "El_number_density"], ret
+            )
+        return ret
 
     registry.add_field(
         (ftype, "rotation_measure"),

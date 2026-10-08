@@ -1,5 +1,6 @@
 import numpy as np
 
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.lib.geometry_utils import compute_morton
 from yt.utilities.math_utils import (
     get_cyl_r,
@@ -25,7 +26,10 @@ def setup_geometric_fields(registry, ftype="gas", slice_info=None):
         Relative to the coordinate system defined by the *center* field
         parameter.
         """
-        return get_radius(data, "", field.name[0])
+        ret = get_radius(data, "", field.name[0])
+        if _sc.enabled() and not _sc._is_detector(data):
+            _sc.check_radius_cross_method(data, field.name[0], ret)
+        return ret
 
     registry.add_field(
         ("index", "radius"),

@@ -6,6 +6,7 @@ from yt.units import dimensions
 from yt.units.unit_object import Unit  # type: ignore
 from yt.units.unit_registry import UnitRegistry  # type: ignore
 from yt.units.yt_array import YTArray, YTQuantity
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.physical_constants import (
     gravitational_constant_cgs as G,
     speed_of_light_cgs,
@@ -113,9 +114,12 @@ class Cosmology:
         The distance corresponding to c / h, where c is the speed of light
         and h is the Hubble parameter in units of 1 / time.
         """
-        return self.quan(speed_of_light_cgs / self.hubble_constant).in_base(
+        ret = self.quan(speed_of_light_cgs / self.hubble_constant).in_base(
             self.unit_system
         )
+        if _sc.enabled():
+            _sc.check_hubble_distance(self, ret)
+        return ret
 
     def comoving_radial_distance(self, z_i, z_f):
         r"""
@@ -143,6 +147,12 @@ class Cosmology:
         ).in_base(self.unit_system)
 
     def comoving_transverse_distance(self, z_i, z_f):
+        ret = self._comoving_transverse_distance(z_i, z_f)
+        if _sc.enabled():
+            _sc.check_transverse_order(self, z_i, z_f, ret)
+        return ret
+
+    def _comoving_transverse_distance(self, z_i, z_f):
         r"""
         When multiplied by some angle, the distance between two objects
         observed at redshift, z_f, with an angular separation given by that
@@ -187,6 +197,13 @@ class Cosmology:
             return self.comoving_radial_distance(z_i, z_f)
 
     def comoving_volume(self, z_i, z_f):
+        ret = self._comoving_volume(z_i, z_f)
+        if _sc.enabled():
+            _sc.check_volume_integral(self, z_i, z_f, ret)
+            _sc.check_volume_additivity(self, z_i, z_f, ret)
+        return ret
+
+    def _comoving_volume(self, z_i, z_f):
         r"""
         "The comoving volume is the volume measure in which number densities
         of non-evolving objects locked into Hubble flow are constant with
@@ -283,10 +300,13 @@ class Cosmology:
 
         """
 
-        return (
+        ret = (
             self.comoving_transverse_distance(0, z_f) / (1 + z_f)
             - self.comoving_transverse_distance(0, z_i) / (1 + z_i)
         ).in_base(self.unit_system)
+        if _sc.enabled():
+            _sc.check_angular_diameter(self, z_i, z_f, ret)
+        return ret
 
     def angular_scale(self, z_i, z_f):
         r"""
@@ -333,10 +353,13 @@ class Cosmology:
 
         """
 
-        return (
+        ret = (
             self.comoving_transverse_distance(0, z_f) * (1 + z_f)
             - self.comoving_transverse_distance(0, z_i) * (1 + z_i)
         ).in_base(self.unit_system)
+        if _sc.enabled():
+            _sc.check_luminosity_reciprocity(self, z_i, z_f, ret)
+        return ret
 
     def lookback_time(self, z_i, z_f):
         r"""
@@ -358,9 +381,12 @@ class Cosmology:
         >>> print(co.lookback_time(0.0, 1.0).in_units("Gyr"))
 
         """
-        return (
+        ret = (
             trapezoid_int(self.age_integrand, z_i, z_f) / self.hubble_constant
         ).in_base(self.unit_system)
+        if _sc.enabled():
+            _sc.check_lookback_time(self, z_i, z_f, ret)
+        return ret
 
     def critical_density(self, z):
         r"""
@@ -381,9 +407,12 @@ class Cosmology:
         >>> print(co.critical_density(0).in_units("Msun/Mpc**3"))
 
         """
-        return (3.0 * self.hubble_parameter(z) ** 2 / 8.0 / np.pi / G).in_base(
+        ret = (3.0 * self.hubble_parameter(z) ** 2 / 8.0 / np.pi / G).in_base(
             self.unit_system
         )
+        if _sc.enabled():
+            _sc.check_critical_density(self, z, ret)
+        return ret
 
     def hubble_parameter(self, z):
         r"""
@@ -476,7 +505,10 @@ class Cosmology:
         table = InterpTable(la_bins[1:], np.log10(-lt))
         t = np.power(10, table(la))
 
-        return (t / self.hubble_constant).in_base(self.unit_system)
+        ret = (t / self.hubble_constant).in_base(self.unit_system)
+        if _sc.enabled():
+            _sc.check_age_flat_lcdm(self, a, ret)
+        return ret
 
     def t_from_z(self, z):
         """
@@ -557,6 +589,8 @@ class Cosmology:
                 raise RuntimeError("a_from_t calculation did not converge!")
 
         a = np.power(10, table(lt))
+        if _sc.enabled():
+            _sc.check_age_inverse(self, t, a)
         return a
 
     def z_from_t(self, t):
@@ -606,6 +640,8 @@ class Cosmology:
             scale_factor, -3.0 * (1.0 + self.w_0 + self.w_a)
         ) * np.exp(-3.0 * self.w_a * (1.0 - scale_factor))
 
+        if _sc.enabled():
+            _sc.check_dark_factor(self, z, dark_factor)
         return dark_factor
 
     _arr = None

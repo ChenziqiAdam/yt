@@ -3,6 +3,7 @@ import re
 import numpy as np
 
 from yt.frontends.sph.data_structures import ParticleDataset
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.chemical_formulas import ChemicalFormula
 from yt.utilities.physical_ratios import _primordial_mass_fraction
 
@@ -265,6 +266,8 @@ def _default_nuclei_density(field, data):
 
 
 def _nuclei_density(field, data):
+    if _sc.enabled() and not _sc._is_detector(data):
+        _sc.check_species_atom_counts(data)
     ftype = field.name[0]
     element = field.name[1][: field.name[1].find("_")]
 

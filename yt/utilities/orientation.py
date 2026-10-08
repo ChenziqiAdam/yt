@@ -1,6 +1,7 @@
 import numpy as np
 
 from yt.units.yt_array import YTArray
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.exceptions import YTException
 
 
@@ -57,6 +58,11 @@ class Orientation:
             self.north_vector = self.unit_vectors[1]
 
     def _setup_normalized_vectors(self, normal_vector, north_vector):
+        _sc_in = (
+            _sc.snapshot_orientation(normal_vector, north_vector)
+            if _sc.enabled()
+            else None
+        )
         normal_vector, north_vector = _validate_unit_vectors(
             normal_vector, north_vector
         )
@@ -83,3 +89,5 @@ class Orientation:
         self.north_vector = north_vector
         self.unit_vectors = YTArray([east_vector, north_vector, normal_vector], "")
         self.inv_mat = np.linalg.pinv(self.unit_vectors)
+        if _sc_in is not None and _sc.enabled():
+            _sc.check_orientation(self, _sc_in)

@@ -2,6 +2,7 @@ from functools import cached_property
 
 import numpy as np
 
+from yt.utilities import _scientific_checkers as _sc
 from yt.utilities.lib.pixelization_routines import pixelize_aitoff, pixelize_cylinder
 
 from .coordinate_handler import (
@@ -56,6 +57,10 @@ class SphericalCoordinateHandler(CoordinateHandler):
             vol = ((r + 0.5 * dr) ** 3 - (r - 0.5 * dr) ** 3) / 3.0
             vol *= np.cos(theta - 0.5 * dtheta) - np.cos(theta + 0.5 * dtheta)
             vol *= data["index", "dphi"]
+            if _sc.enabled() and not _sc._is_detector(data):
+                _sc.check_spherical_volume(
+                    r, dr, theta, dtheta, data["index", "dphi"], vol, "YT-GEO-008"
+                )
             return vol
 
         registry.add_field(
