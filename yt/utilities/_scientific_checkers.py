@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import math
 import os
 import warnings
@@ -80,6 +81,9 @@ def _guarded(fn):
         if _ACTIVE or not os.environ.get(_ENV):
             return None
         _ACTIVE = True
+        logger = logging.getLogger("yt")
+        level = logger.level
+        logger.setLevel(logging.CRITICAL + 1)
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -89,6 +93,7 @@ def _guarded(fn):
             _swallowed()
             return None
         finally:
+            logger.setLevel(level)
             _ACTIVE = False
 
     return wrapper
@@ -546,7 +551,7 @@ def check_species_atom_counts(data):
 @_guarded
 def check_radial_mach(data, ftype, result):
     """YT-FLD-001"""
-    mach = _a(data[ftype, "mach_number"])
+    mach = _a(_fetch(data, (ftype, "mach_number")))
     rad = _a(result)
     if mach.shape != rad.shape:
         return
@@ -558,9 +563,9 @@ def check_radial_mach(data, ftype, result):
 def check_courant(data, ftype, result):
     """YT-FLD-002"""
     dt = _val(result, "s")
-    d = np.minimum.reduce([_val(data[ftype, f"d{ax}"], "cm") for ax in "xyz"])
-    cs = _val(data[ftype, "sound_speed"], "cm/s")
-    v = np.sqrt(sum(_val(data[ftype, f"velocity_{ax}"], "cm/s") ** 2 for ax in "xyz"))
+    d = np.minimum.reduce([_val(_fetch(data, (ftype, f"d{ax}")), "cm") for ax in "xyz"])
+    cs = _val(_fetch(data, (ftype, "sound_speed")), "cm/s")
+    v = np.sqrt(sum(_val(_fetch(data, (ftype, f"velocity_{ax}")), "cm/s") ** 2 for ax in "xyz"))
     if dt.shape != d.shape or dt.shape != cs.shape:
         return
     good = np.isfinite(dt) & np.isfinite(d) & np.isfinite(cs) & np.isfinite(v) & (cs > 0) & (d > 0)
@@ -588,10 +593,10 @@ def _b_tesla(data, b):
 @_guarded
 def check_alfven_si(data, ftype, result):
     """YT-FLD-003"""
-    b_t = _b_tesla(data, data[ftype, "magnetic_field_strength"])
+    b_t = _b_tesla(data, _fetch(data, (ftype, "magnetic_field_strength")))
     if b_t is None:
         return
-    rho = _val(data[ftype, "density"], "kg/m**3")
+    rho = _val(_fetch(data, (ftype, "density")), "kg/m**3")
     got = _val(result, "m/s")
     if b_t.shape != got.shape or rho.shape != got.shape:
         return
@@ -604,7 +609,7 @@ def check_alfven_si(data, ftype, result):
 @_guarded
 def check_magnetic_energy_si(data, ftype, result):
     """YT-FLD-004"""
-    b_t = _b_tesla(data, data[ftype, "magnetic_field_strength"])
+    b_t = _b_tesla(data, _fetch(data, (ftype, "magnetic_field_strength")))
     if b_t is None:
         return
     got = _val(result, "J/m**3")
@@ -618,8 +623,8 @@ def check_magnetic_energy_si(data, ftype, result):
 @_guarded
 def check_poloidal_toroidal(data, ftype, result):
     """YT-FLD-005"""
-    b = data[ftype, "magnetic_field_strength"]
-    tor = data[ftype, "magnetic_field_toroidal_magnitude"]
+    b = _fetch(data, (ftype, "magnetic_field_strength"))
+    tor = _fetch(data, (ftype, "magnetic_field_toroidal_magnitude"))
     unit = b.units
     bs, ts, ps = _val(b, unit), _val(tor, unit), _val(result, unit)
     if not (bs.shape == ts.shape == ps.shape):
@@ -632,7 +637,7 @@ def check_poloidal_toroidal(data, ftype, result):
 @_guarded
 def check_four_velocity(data, result_ut):
     """YT-FLD-006"""
-    u = _val(data["gas", "four_velocity_magnitude"], "cm/s")
+    u = _val(_fetch(data, ("gas", "four_velocity_magnitude")), "cm/s")
     ut = _val(result_ut, "cm/s")
     if u.shape != ut.shape:
         return
@@ -654,12 +659,29 @@ def check_overdensity_normalization(data, ftype, result):
             return
     z = float(ds.current_redshift)
     om_z = co.omega_matter * (1.0 + z) ** 3 / float(co.expansion_factor(z)) ** 2
-    od = _a(data[ftype, "overdensity"])
+    od = _a(_fetch(data, (ftype, "overdensity")))
     md = _a(result)
     if od.shape != md.shape:
         return
     good = np.isfinite(od) & np.isfinite(md) & (md != 0)
     trigger_if(np.any((np.abs(od - md * om_z) > 1e-10 * np.abs(od)) & good), "YT-FLD-007")
+
+
+def _fetch(data, key):
+    """Read ``data[key]`` while ``data`` is locked for field generation.
+
+    yt raises ``GenerationInProgress`` for any field that is not yet available while a field
+    function runs (its dependency-discovery protocol). A checker needs extra fields without
+    changing that bookkeeping for the production call, so the lock is lifted for this read only.
+    """
+    if key in data.field_data:
+        return data.field_data[key]
+    locked = getattr(data, "_locked", False)
+    data._locked = False
+    try:
+        return data[key]
+    finally:
+        data._locked = locked
 
 
 def _is_detector(data):
@@ -822,7 +844,7 @@ def check_radius_cross_method(data, ftype, result):
     if _is_detector(data):
         return
     r1 = _val(result, "cm")
-    r2 = _val(data["index", "spherical_radius"], "cm")
+    r2 = _val(_fetch(data, ("index", "spherical_radius")), "cm")
     if r1.shape != r2.shape:
         return
     width = float(np.max(_val(data.ds.domain_width, "cm")))
