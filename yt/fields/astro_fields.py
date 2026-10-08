@@ -88,7 +88,7 @@ def setup_astro_fields(registry, ftype="gas", slice_info=None):
     def _optical_depth(data):
         ret = data[ftype, "El_number_density"] * pc.sigma_thompson
         if _sc.enabled() and not _sc._is_detector(data):
-            _sc.check_thomson(pc.sigma_thompson.to_value("cm**2"))
+            _sc.check_thomson(pc.sigma_thompson)
         return ret
 
     registry.add_field(

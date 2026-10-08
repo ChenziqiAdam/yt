@@ -109,7 +109,32 @@ def _a(x):
     return np.asarray(getattr(x, "d", x), dtype=np.float64)
 
 
+_PRIVATE_REGISTRY = None
+
+
+def _unit(spec):
+    """Unit object from a registry private to the checkers.
+
+    Parsing a unit *string* in a production registry fills its ``_unit_object_cache``; production code
+    later finds that entry by string key, and its ``base_value`` can differ from the one it would have
+    built itself by one ULP. Conversions therefore go through ``Unit`` objects of a private registry.
+    """
+    global _PRIVATE_REGISTRY
+    from unyt import Unit, UnitRegistry
+
+    if _PRIVATE_REGISTRY is None:
+        _PRIVATE_REGISTRY = UnitRegistry()
+    return Unit(spec, registry=_PRIVATE_REGISTRY)
+
+
 def _val(q, unit):
+    if isinstance(unit, str):
+        if "code_" in unit:
+            from unyt import Unit
+
+            unit = Unit(unit, registry=q.units.registry)
+        else:
+            unit = _unit(unit)
     return np.asarray(q.to_value(unit), dtype=np.float64)
 
 
@@ -151,7 +176,7 @@ def _cosmo_ok(co):
 
 
 def _h0_kms_mpc(co):
-    return float(co.hubble_constant.to_value("km/s/Mpc"))
+    return float(_val(co.hubble_constant, "km/s/Mpc"))
 
 
 def _zs(*zs, limit=64):
@@ -247,7 +272,7 @@ def check_age_inverse(co, t, a_result):
     if not _cosmo_ok(co):
         return
     a = np.atleast_1d(_a(a_result))
-    tt = np.atleast_1d(_val(t if hasattr(t, "to_value") else co.arr(t, "s"), "s"))
+    tt = np.atleast_1d(_val(t, "s") if hasattr(t, "to_value") else _a(t))
     if a.size > 256 or a.size != tt.size:
         return
     keep = np.isfinite(a) & (a >= 1e-2) & (a <= 10.0)
@@ -274,7 +299,7 @@ def check_age_flat_lcdm(co, a, result):
     if a.size != res.size or a.size > 4096:
         return
     keep = np.isfinite(a) & (a >= 1e-2) & (a <= 10.0)
-    h0 = float(co.hubble_constant.to_value("1/s"))
+    h0 = float(_val(co.hubble_constant, "1/s"))
     t_an = 2.0 / (3.0 * h0 * math.sqrt(ol)) * np.arcsinh(math.sqrt(ol / om) * a**1.5)
     trigger_if(np.any(np.abs(res[keep] - t_an[keep]) > 5e-5 * t_an[keep]), "YT-COS-005")
 
@@ -447,20 +472,20 @@ def check_dark_factor(co, z, result):
 
 
 @_guarded
-def check_thomson(result_sigma_cm2):
-    """YT-PHC-001: ``result_sigma_cm2`` is the Thomson cross section the field used (cm^2)."""
+def check_thomson(sigma):
+    """YT-PHC-001: ``sigma`` is the Thomson cross section the field used."""
     from yt.utilities.physical_constants import (
         charge_proton_cgs,
         mass_electron_cgs,
         speed_of_light_cgs,
     )
 
-    e = float(charge_proton_cgs.to_value("esu"))
-    m = float(mass_electron_cgs.to_value("g"))
-    c = float(speed_of_light_cgs.to_value("cm/s"))
+    e = float(_val(charge_proton_cgs, "esu"))
+    m = float(_val(mass_electron_cgs, "g"))
+    c = float(_val(speed_of_light_cgs, "cm/s"))
     r_e = e**2 / (m * c**2)
     expected = 8.0 * math.pi / 3.0 * r_e**2
-    trigger_if(abs(float(result_sigma_cm2) / expected - 1.0) > 1e-5, "YT-PHC-001")
+    trigger_if(abs(float(_val(sigma, "cm**2")) / expected - 1.0) > 1e-5, "YT-PHC-001")
 
 
 @_guarded
@@ -825,7 +850,7 @@ def check_periodic_position(pos, ds, result):
     unit = "code_length"
 
     def conv(x):
-        return np.asarray(x.to_value(unit) if hasattr(x, "to_value") else x, dtype=np.float64)
+        return _val(x, unit) if hasattr(x, "to_value") else np.asarray(x, dtype=np.float64)
 
     p, out = conv(pos), conv(result)
     le, re = conv(ds.domain_left_edge), conv(ds.domain_right_edge)
