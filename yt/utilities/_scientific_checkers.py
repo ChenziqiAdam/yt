@@ -165,6 +165,19 @@ def _small(*arrays):
     return all(np.size(x) <= _MAX_ELEMENTS for x in arrays)
 
 
+def _basis_ok(vec):
+    """Direction vector usable for an orthonormal triad: finite, nonzero, nonzero components within 1e100 of each other.
+
+    ``ortho_find`` forms ratios of components and squares them, so a component ratio beyond ~1e154 overflows
+    (silent zero vectors); such inputs are outside the stated range of the triad laws.
+    """
+    a = np.abs(np.asarray(getattr(vec, "d", vec), dtype=np.float64))
+    if a.size == 0 or not np.all(np.isfinite(a)):
+        return False
+    nz = a[a > 0]
+    return nz.size > 0 and float(nz.max() / nz.min()) <= 1e100
+
+
 # ---------------------------------------------------------------------------
 # A. cosmology (utilities/cosmology.py)
 # ---------------------------------------------------------------------------
@@ -734,7 +747,7 @@ def check_sph_cyl_consistency(coords, normal, theta):
     from yt.utilities.math_utils import get_cyl_r, get_cyl_z, get_sph_r
 
     c = _a(coords)
-    if not _vec_shape_ok(c) or not _small(c) or not np.any(_a(normal)):
+    if not _vec_shape_ok(c) or not _small(c) or not _basis_ok(normal):
         return
     th = _a(theta)
     r = _a(get_sph_r(c))
@@ -754,7 +767,7 @@ def check_azimuth_equivariance(coords, normal, phi):
 
     c = _a(coords)
     n = _a(normal).astype(np.float64)
-    if not _vec_shape_ok(c) or not _small(c) or not np.any(n):
+    if not _vec_shape_ok(c) or not _small(c) or not _basis_ok(n):
         return
     n = n / np.linalg.norm(n)
     nb = n.reshape((3,) + (1,) * (c.ndim - 1))
@@ -788,7 +801,7 @@ def check_cyl_parseval(vectors, theta, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not np.any(_a(normal)):
+    if not _vec_shape_ok(v) or not _small(v) or not _basis_ok(normal):
         return
     comps = [
         get_cyl_r_component(vectors, theta, normal),
@@ -808,7 +821,7 @@ def check_sph_parseval(vectors, theta, phi, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not np.any(_a(normal)):
+    if not _vec_shape_ok(v) or not _small(v) or not _basis_ok(normal):
         return
     comps = [
         get_sph_r_component(vectors, theta, phi, normal),
@@ -1045,7 +1058,7 @@ def check_ortho_find(vec1, out):
     v = np.asarray(vec1, dtype=np.float64)
     e1, e2, e3 = (np.asarray(x, dtype=np.float64) for x in out)
     nv = float(np.linalg.norm(v))
-    if v.shape != (3,) or not np.isfinite(nv) or nv == 0:
+    if v.shape != (3,) or not np.isfinite(nv) or nv == 0 or not _basis_ok(v):
         return
     tol = _C * _EPS
     errs = [
