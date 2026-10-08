@@ -888,8 +888,18 @@ def _cell_quad_nodes():
 
 
 @_guarded
-def check_spherical_volume(r, dr, theta, dtheta, dphi, result, tag="YT-GEO-008"):
-    """YT-GEO-008 / YT-GEO-010 (same Jacobian, different handlers)."""
+def check_spherical_volume(r, dr, theta, dtheta, dphi, result):
+    """YT-GEO-008"""
+    _spherical_volume(r, dr, theta, dtheta, dphi, result, "YT-GEO-008")
+
+
+@_guarded
+def check_geographic_volume(r, dr, theta, dtheta, dphi, result):
+    """YT-GEO-010 (same Jacobian as GEO-008, geographic handler)"""
+    _spherical_volume(r, dr, theta, dtheta, dphi, result, "YT-GEO-010")
+
+
+def _spherical_volume(r, dr, theta, dtheta, dphi, result, tag):
     r_, dr_ = _val(r, "code_length"), _val(dr, "code_length")
     t_, dt_ = _a(theta), _a(dtheta)
     dp_ = _a(dphi)
@@ -1004,21 +1014,21 @@ def check_matrix_to_quat(rot, quaternion):
 @_guarded
 def check_modify_frame(com, l_in, p_in, v_in, l_out, p_out, v_out):
     """YT-ROT-004"""
-    l0 = np.asarray(l_in, dtype=np.float64)
-    lo = np.asarray(l_out, dtype=np.float64)
+    l0 = _a(l_in)
+    lo = _a(l_out)
     nl = float(np.linalg.norm(l0))
     if l0.shape != (3,) or not np.isfinite(nl) or nl == 0:
         return
     bad = np.max(np.abs(lo - np.array([0.0, 0.0, nl]))) > 1e-6 * nl
     pc = vv = None
     if p_in is not None and p_out is not None:
-        pc = np.asarray(p_in, dtype=np.float64) - np.asarray(com, dtype=np.float64)
-        po = np.asarray(p_out, dtype=np.float64)
+        pc = _a(p_in - com)  # unit-aware difference: centre and positions may carry different units
+        po = _a(p_out)
         n_in, n_out = np.linalg.norm(pc, axis=-1), np.linalg.norm(po, axis=-1)
         bad |= bool(np.any(np.abs(n_in - n_out) > _C * _EPS * np.maximum(n_in, 1e-300)))
     if v_in is not None and v_out is not None:
-        vv = np.asarray(v_in, dtype=np.float64)
-        vo = np.asarray(v_out, dtype=np.float64)
+        vv = _a(v_in)
+        vo = _a(v_out)
         n_in, n_out = np.linalg.norm(vv, axis=-1), np.linalg.norm(vo, axis=-1)
         bad |= bool(np.any(np.abs(n_in - n_out) > _C * _EPS * np.maximum(n_in, 1e-300)))
     if pc is not None and vv is not None:
@@ -1061,9 +1071,9 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
         compute_rotational_velocity,
     )
 
-    p = np.asarray(p_in, dtype=np.float64)
-    v = np.asarray(v_in, dtype=np.float64)
-    l0 = np.asarray(l_in, dtype=np.float64)
+    p = _a(p_in)
+    v = _a(v_in)
+    l0 = _a(l_in)
     if p.ndim != 2 or p.shape != v.shape or p.shape[1] != 3 or l0.shape != (3,) or not l0.any():
         return
     if not _small(p) or p.shape[0] > 20_000:
@@ -1072,7 +1082,7 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
     rad = np.asarray(compute_radial_velocity(com, l_in, p_in, v_in), dtype=np.float64)
     par = np.asarray(compute_parallel_velocity(com, l_in, p_in, v_in), dtype=np.float64)
     cyl = np.asarray(compute_cylindrical_radius(com, l_in, p_in, v_in), dtype=np.float64)
-    scale = float(np.max(np.linalg.norm(p - np.asarray(com, dtype=np.float64), axis=1)))
+    scale = float(np.max(np.linalg.norm(_a(p_in - com), axis=1)))
     v2 = np.sum(v**2, axis=1)
     good = np.isfinite(rot) & np.isfinite(rad) & np.isfinite(par) & (cyl > 1e-9 * scale)
     err = np.abs(rot**2 + rad**2 + par**2 - v2)

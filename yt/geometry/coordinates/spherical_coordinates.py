@@ -59,7 +59,7 @@ class SphericalCoordinateHandler(CoordinateHandler):
             vol *= data["index", "dphi"]
             if _sc.enabled() and not _sc._is_detector(data):
                 _sc.check_spherical_volume(
-                    r, dr, theta, dtheta, data["index", "dphi"], vol, "YT-GEO-008"
+                    r, dr, theta, dtheta, data["index", "dphi"], vol
                 )
             return vol
 

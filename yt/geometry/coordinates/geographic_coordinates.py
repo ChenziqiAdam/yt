@@ -91,8 +91,8 @@ class GeographicCoordinateHandler(CoordinateHandler):
             vol *= np.cos(theta - 0.5 * dtheta) - np.cos(theta + 0.5 * dtheta)
             vol *= data["index", "dphi"]
             if _sc.enabled() and not _sc._is_detector(data):
-                _sc.check_spherical_volume(
-                    r, dr, theta, dtheta, data["index", "dphi"], vol, "YT-GEO-010"
+                _sc.check_geographic_volume(
+                    r, dr, theta, dtheta, data["index", "dphi"], vol
                 )
             return vol
 
