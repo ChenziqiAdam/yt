@@ -28,7 +28,7 @@
       "symbol": "Cosmology.hubble_distance"
     },
     {
-      "alarm": "`|lookback - (t(z_i) - t(z_f))| > 5e-5 * t(z_i)` (model error: log-table linear interpolation at 1000 bins/dex ~ 1e-6, cumulative trapezoid ~ 4e-7, log-spaced trapezoid ~ 4e-8)",
+      "alarm": "`|lookback - (t(z_i) - t(z_f))| > 5e-5 * t(z_i)` (model error: log-table linear interpolation at 1000 bins/dex ~ 1e-6, cumulative trapezoid ~ 4e-7; a correct 10000-panel log-spaced trapezoid agrees to ~1e-9, whereas dropping one panel biases the lookback by ~1e-4)",
       "family": "lookback_age_consistency",
       "id": "YT-COS-003",
       "invariant": "`lookback_time(z_i, z_f) = t_from_z(z_i) - t_from_z(z_f)` (two independent routes to the same elapsed time: quadrature in redshift vs the tabulated age integral)",
@@ -309,7 +309,7 @@
       "id": "YT-GEO-005",
       "invariant": "`d <= euclidean(a,b)`, `d <= sqrt(sum_periodic (L_i/2)^2 + sum_nonperiodic L_i^2)` and `d(a,b) = d(b,a)`",
       "observation_point": "return of `periodic_dist`",
-      "precondition": "floating-point or signed-integer coordinates (unsigned subtraction wraps); `|a_i - b_i| <= L_i` per axis",
+      "precondition": "floating-point coordinates or signed-integer coordinates whose differences are representable in the input dtype (unsigned subtraction and int8/int16 differences beyond the dtype range wrap); `|a_i - b_i| <= L_i` per axis",
       "rationale": "the minimum-image convention bounds distances by half the box.",
       "scientific_quantity": "minimum-image distance",
       "source": "yt/utilities/math_utils.py",

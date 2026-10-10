@@ -870,6 +870,11 @@ def check_periodic_dist(a, b, period, periodicity, result):
 
     if np.asarray(a).dtype.kind == "u" or np.asarray(b).dtype.kind == "u":
         return  # unsigned lattice indices: subtraction wraps (integer-dtype convention, not a physical input)
+    dt_ab = np.result_type(np.asarray(a), np.asarray(b))
+    if dt_ab.kind == "i":  # signed integers: a - b must be representable in the working dtype (int8/int16 wrap)
+        span = np.max(np.abs(np.asarray(a, dtype=np.int64) - np.asarray(b, dtype=np.int64)), initial=0)
+        if span > np.iinfo(dt_ab).max:
+            return
     a_in, b_in = a, b
     eps = _eps_of(a_in, b_in)
     a, b = np.array(a, dtype=np.float64), np.array(b, dtype=np.float64)
