@@ -184,13 +184,24 @@ def _small(*arrays):
 
 
 def _range_ok(*arrays):
-    """All finite values are zero or within ``[1e-100, 1e100]`` in magnitude (squares and ratios stay representable)."""
+    """All finite values are zero or within ``[1e-100, 1e100]`` in magnitude (squares and ratios stay representable).
+
+    For floating-point inputs the window is narrowed to the caller's dtype: squares and sums of three squares must
+    stay normal and finite in the working precision (about ``[3e-16, 6.6e17]`` for float32).
+    """
     for x in arrays:
         if x is None:
             continue
-        a = np.abs(np.asarray(getattr(x, "d", x), dtype=np.float64))
+        raw = getattr(x, "d", x)
+        dt = getattr(raw, "dtype", None)
+        lo, hi = 1e-100, 1e100
+        if dt is not None and np.issubdtype(dt, np.floating):
+            fi = np.finfo(dt)
+            lo = max(lo, math.sqrt(float(fi.tiny) / float(fi.eps)))
+            hi = min(hi, math.sqrt(float(fi.max) / 3.0) / 16.0)
+        a = np.abs(np.asarray(raw, dtype=np.float64))
         a = a[np.isfinite(a) & (a > 0)]
-        if a.size and (a.min() < 1e-100 or a.max() > 1e100):
+        if a.size and (a.min() < lo or a.max() > hi):
             return False
     return True
 
@@ -201,6 +212,8 @@ def _basis_ok(vec):
     ``ortho_find`` forms ratios of components and squares them, so a component ratio beyond ~1e154 overflows
     (silent zero vectors); such inputs are outside the stated range of the triad laws.
     """
+    if not _range_ok(vec):
+        return False
     a = np.abs(np.asarray(getattr(vec, "d", vec), dtype=np.float64))
     if a.size == 0 or not np.all(np.isfinite(a)):
         return False
@@ -766,7 +779,7 @@ def check_sph_cyl_consistency(coords, normal, theta):
     from yt.utilities.math_utils import get_cyl_r, get_cyl_z, get_sph_r
 
     c = _a(coords)
-    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(c) or not _basis_ok(normal):
+    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(coords) or not _basis_ok(normal):
         return
     th = _a(theta)
     r = _a(get_sph_r(c))
@@ -786,7 +799,7 @@ def check_azimuth_equivariance(coords, normal, phi):
 
     c = _a(coords)
     n = _a(normal).astype(np.float64)
-    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(c) or not _basis_ok(n):
+    if not _vec_shape_ok(c) or not _small(c) or not _range_ok(coords) or not _basis_ok(normal):
         return
     n = n / np.linalg.norm(n)
     nb = n.reshape((3,) + (1,) * (c.ndim - 1))
@@ -820,7 +833,7 @@ def check_cyl_parseval(vectors, theta, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(v) or not _basis_ok(normal):
+    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(vectors) or not _basis_ok(normal):
         return
     comps = [
         get_cyl_r_component(vectors, theta, normal),
@@ -840,7 +853,7 @@ def check_sph_parseval(vectors, theta, phi, normal):
     )
 
     v = _a(vectors)
-    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(v) or not _basis_ok(normal):
+    if not _vec_shape_ok(v) or not _small(v) or not _range_ok(vectors) or not _basis_ok(normal):
         return
     comps = [
         get_sph_r_component(vectors, theta, phi, normal),
@@ -1002,7 +1015,7 @@ def check_rotate_vector(a, dim, angle, result):
     """YT-ROT-002"""
     v = np.asarray(a, dtype=np.float64)
     out = np.asarray(result, dtype=np.float64)
-    if v.shape != out.shape or v.shape[-1] != 3 or not np.all(np.isfinite(v)) or not _range_ok(v):
+    if v.shape != out.shape or v.shape[-1] != 3 or not np.all(np.isfinite(v)) or not _range_ok(a):
         return
     n_in = np.sqrt(np.sum(v**2, axis=-1))
     n_out = np.sqrt(np.sum(out**2, axis=-1))
@@ -1056,7 +1069,7 @@ def check_modify_frame(com, l_in, p_in, v_in, l_out, p_out, v_out):
     l0 = _a(l_in)
     lo = _a(l_out)
     nl = float(np.linalg.norm(l0))
-    if l0.shape != (3,) or not np.isfinite(nl) or nl == 0 or not _range_ok(l0, _a(p_in) if p_in is not None else None, _a(v_in) if v_in is not None else None):
+    if l0.shape != (3,) or not np.isfinite(nl) or nl == 0 or not _range_ok(l_in, p_in, v_in):
         return
     # the two arccos steps have conditioning ~eps/sin(angle) <= sqrt(eps) of the working precision of L
     tol_align = max(1e-6, 2.0 * math.sqrt(_eps_of(l_in)))
@@ -1115,7 +1128,7 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
     p = _a(p_in)
     v = _a(v_in)
     l0 = _a(l_in)
-    if p.ndim != 2 or p.shape != v.shape or p.shape[1] != 3 or l0.shape != (3,) or not l0.any() or not _range_ok(p, v, l0):
+    if p.ndim != 2 or p.shape != v.shape or p.shape[1] != 3 or l0.shape != (3,) or not l0.any() or not _range_ok(p_in, v_in, l_in):
         return
     if not _small(p) or p.shape[0] > 20_000:
         return
