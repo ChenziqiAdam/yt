@@ -218,6 +218,17 @@ def _cosmo_ok(co):
     return all(np.isfinite(v) for v in vals) and co.omega_matter > 0
 
 
+_E2_MIN_AGE = 0.05  # age checks require min E^2 >= 0.05 on z in [0, 99] (no near-loitering epoch)
+
+
+def _age_table_resolved(co):
+    """True when E(z)^2 stays >= _E2_MIN_AGE on z in [0, 99]: the age integral 1/E is then smooth
+    enough for yt's fixed log-spaced table (1000 bins/dex) to meet the 5e-5 age tolerance."""
+    z = np.expm1(np.linspace(0.0, math.log(100.0), 20001))
+    e2 = np.asarray(co.expansion_factor(z), dtype=np.float64) ** 2
+    return bool(np.all(np.isfinite(e2)) and float(np.min(e2)) >= _E2_MIN_AGE)
+
+
 def _h0_kms_mpc(co):
     return float(_val(co.hubble_constant, "km/s/Mpc"))
 
@@ -290,7 +301,7 @@ def check_hubble_distance(co, result):
 @_guarded
 def check_lookback_time(co, z_i, z_f, result):
     """YT-COS-003"""
-    if not _cosmo_ok(co):
+    if not _cosmo_ok(co) or not _age_table_resolved(co):
         return
     zz = _zs(z_i, z_f)
     if zz is None:
@@ -312,8 +323,8 @@ def check_lookback_time(co, z_i, z_f, result):
 @_guarded
 def check_age_inverse(co, t, a_result):
     """YT-COS-004"""
-    if not _cosmo_ok(co) or float(np.min(co.expansion_factor(np.expm1(np.linspace(0.0, math.log(100.0), 20001))) ** 2)) < 1e-4:
-        return  # near-loitering models (E^2 min < 1e-4) exceed the age table's resolution
+    if not _cosmo_ok(co) or not _age_table_resolved(co):
+        return
     a = np.atleast_1d(_a(a_result))
     tt = np.atleast_1d(_val(t, "s") if hasattr(t, "to_value") else _a(t))
     if a.size > 256 or a.size != tt.size:
