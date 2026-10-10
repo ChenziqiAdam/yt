@@ -29,6 +29,7 @@ _EPS = float(np.finfo(np.float64).eps)
 _C = 64.0
 _ENV = "SCIBENCH_TRIGGER_LOG"
 _MAX_ELEMENTS = 2_000_000
+_YT_TRAP_BINS = 10000  # default `bins` of yt.utilities.cosmology.trapezoid_int
 _MU_0 = 1.25663706212e-6  # CODATA 2018 vacuum permeability, N A^-2
 _C_LIGHT_CM = 2.99792458e10  # defined
 
@@ -107,6 +108,23 @@ def _guarded(fn):
 def _a(x):
     """Unit-stripped float64 ndarray."""
     return np.asarray(getattr(x, "d", x), dtype=np.float64)
+
+
+def _eps_of(*xs):
+    """Largest machine epsilon among the floating-point dtypes of the given inputs (float64 when none is floating).
+
+    Roundoff tolerances must follow the working precision of the data, not of the checker's float64 re-evaluation.
+    """
+    eps = _EPS
+    for x in xs:
+        if x is None:
+            continue
+        dt = getattr(getattr(x, "d", x), "dtype", None)
+        if dt is None:
+            dt = np.asarray(x).dtype
+        if np.issubdtype(dt, np.floating):
+            eps = max(eps, float(np.finfo(dt).eps))
+    return eps
 
 
 _PRIVATE_REGISTRY = None
@@ -374,7 +392,8 @@ def check_angular_diameter(co, z_i, z_f, result):
         t1 = m2 * math.sqrt(1.0 + ok * m1**2)
         t2 = m1 * math.sqrt(1.0 + ok * m2**2)
         expected = d_h * (t1 - t2) / (1.0 + zf[k])
-        tol = 1e-6 * d_h * (abs(t1) + abs(t2)) / (1.0 + zf[k])
+        # yt integrates 1/E with trapezoid_int (first-order, relative error ~1e-4 at the default bins): allow 4/bins
+        tol = max(1e-6, 4.0 / _YT_TRAP_BINS) * d_h * (abs(t1) + abs(t2)) / (1.0 + zf[k])
         trigger_if(abs(res[k] - expected) > tol, "YT-COS-007")
 
 
@@ -444,7 +463,8 @@ def check_volume_integral(co, z_i, z_f, result):
         v = _volume_independent(co, zi[k], zf[k])
         if v is None or not np.isfinite(v) or v <= 0:
             continue
-        trigger_if(abs(res[k] / v - 1.0) > 1e-5, "YT-COS-009")
+        # V ~ D_C^3 on the flat branch: 3x the D_C quadrature error of yt's trapezoid_int; allow 12/bins
+        trigger_if(abs(res[k] / v - 1.0) > 12.0 / _YT_TRAP_BINS, "YT-COS-009")
 
 
 @_guarded
@@ -478,6 +498,7 @@ def check_dark_factor(co, z, result):
     w0, wa = float(co.w_0), float(co.w_a)
     if not (abs(w0) <= 5 and abs(wa) <= 5):
         return
+    tol = max(1e-9, 16.0 * _eps_of(z))  # 1e-9 for float64 redshifts; float32 input yields a float32 result
     z = np.atleast_1d(_a(z))
     res = np.atleast_1d(_a(result))
     if z.size > 256 or z.size != res.size:
@@ -488,7 +509,7 @@ def check_dark_factor(co, z, result):
             continue
         integral = _quad(lambda u: 1.0 + w0 + wa * (1.0 - np.exp(u)), math.log(a), 0.0, panels=8)
         expected = math.exp(3.0 * integral)
-        trigger_if(abs(res[k] / expected - 1.0) > 1e-9, "YT-COS-011")
+        trigger_if(abs(res[k] / expected - 1.0) > tol, "YT-COS-011")
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +763,7 @@ def check_sph_cyl_consistency(coords, normal, theta):
     rr = _a(get_cyl_r(c, normal))
     sin_t = np.abs(np.sin(th))
     good = np.isfinite(r) & (r > 0) & (sin_t >= 1e-4)
-    tol = _C * _EPS * r / np.where(sin_t > 0, sin_t, 1.0)
+    tol = _C * _eps_of(coords, normal, theta) * r / np.where(sin_t > 0, sin_t, 1.0)
     bad = (np.abs(r * np.cos(th) - z) > tol) | (np.abs(r * np.sin(th) - rr) > tol)
     trigger_if(np.any(bad & good), "YT-GEO-001")
 
@@ -767,15 +788,15 @@ def check_azimuth_equivariance(coords, normal, phi):
     big_r = np.sqrt(np.sum(cross**2, axis=0))
     good = np.isfinite(r) & (r > 0) & (big_r / np.where(r > 0, r, 1.0) >= 1e-4)
     err = np.abs(_wrap_pi(phi2 - _a(phi) - alpha))
-    tol = 4 * _C * _EPS * r / np.where(big_r > 0, big_r, 1.0)
+    tol = 4 * _C * _eps_of(coords, normal, phi) * r / np.where(big_r > 0, big_r, 1.0)
     trigger_if(np.any((err > tol) & good), "YT-GEO-002")
 
 
-def _basis_components_norm(vectors, comps, tag):
+def _basis_components_norm(vectors, comps, tag, eps=_EPS):
     v2 = np.sum(_a(vectors) ** 2, axis=0)
     s2 = sum(_a(c) ** 2 for c in comps)
     good = np.isfinite(v2) & np.isfinite(s2)
-    trigger_if(np.any((np.abs(s2 - v2) > 4 * _C * _EPS * v2) & good), tag)
+    trigger_if(np.any((np.abs(s2 - v2) > 4 * _C * eps * v2) & good), tag)
 
 
 @_guarded
@@ -795,7 +816,7 @@ def check_cyl_parseval(vectors, theta, normal):
         get_cyl_theta_component(vectors, theta, normal),
         get_cyl_z_component(vectors, normal),
     ]
-    _basis_components_norm(vectors, comps, "YT-GEO-003")
+    _basis_components_norm(vectors, comps, "YT-GEO-003", _eps_of(vectors, theta, normal))
 
 
 @_guarded
@@ -815,7 +836,7 @@ def check_sph_parseval(vectors, theta, phi, normal):
         get_sph_theta_component(vectors, theta, phi, normal),
         get_sph_phi_component(vectors, phi, normal),
     ]
-    _basis_components_norm(vectors, comps, "YT-GEO-004")
+    _basis_components_norm(vectors, comps, "YT-GEO-004", _eps_of(vectors, theta, phi, normal))
 
 
 @_guarded
@@ -825,6 +846,8 @@ def check_periodic_dist(a, b, period, periodicity, result):
 
     if np.asarray(a).dtype.kind == "u" or np.asarray(b).dtype.kind == "u":
         return  # unsigned lattice indices: subtraction wraps (integer-dtype convention, not a physical input)
+    a_in, b_in = a, b
+    eps = _eps_of(a_in, b_in)
     a, b = np.array(a, dtype=np.float64), np.array(b, dtype=np.float64)
     if a.shape != b.shape or a.ndim < 1 or a.shape[0] != 3 or not _small(a):
         return
@@ -840,9 +863,9 @@ def check_periodic_dist(a, b, period, periodicity, result):
     bound = np.sqrt(np.sum(np.where(p, (per / 2.0) ** 2, per**2) * np.ones_like(diff), axis=0))
     euclid = np.sqrt(np.sum(diff**2, axis=0))
     d = np.asarray(result, dtype=np.float64)
-    d_swap = np.asarray(periodic_dist(b, a, period, periodicity), dtype=np.float64)
-    tol = _C * _EPS * np.maximum(d, 1e-300)
-    bad = (d > euclid * (1 + _C * _EPS)) | (d > bound * (1 + _C * _EPS)) | (np.abs(d - d_swap) > tol)
+    d_swap = np.asarray(periodic_dist(b_in, a_in, period, periodicity), dtype=np.float64)  # same dtype as the call checked
+    tol = _C * eps * np.maximum(d, 1e-300)
+    bad = (d > euclid * (1 + _C * eps)) | (d > bound * (1 + _C * eps)) | (np.abs(d - d_swap) > tol)
     trigger_if(np.any(bad & np.isfinite(d)), "YT-GEO-005")
 
 
@@ -953,9 +976,10 @@ def check_rotation_matrix(theta, rot_vector, rot):
     a = np.asarray(rot_vector, dtype=np.float64).ravel()
     norm = float(np.linalg.norm(a))
     r = np.asarray(rot, dtype=np.float64)
-    if a.size != 3 or not np.isfinite(norm) or abs(norm - 1.0) > 1e-12 or r.shape != (3, 3):
+    eps = _eps_of(theta, rot_vector, rot)
+    if a.size != 3 or not np.isfinite(norm) or abs(norm - 1.0) > max(1e-12, 4.0 * eps) or r.shape != (3, 3):
         return
-    tol = _C * _EPS + 8.0 * abs(norm - 1.0)
+    tol = _C * eps + 8.0 * abs(norm - 1.0)
     orth = np.max(np.abs(r.T @ r - np.eye(3)))
     det = abs(np.linalg.det(r) - 1.0)
     axis = np.max(np.abs(r @ a - a))
@@ -972,7 +996,7 @@ def check_rotate_vector(a, dim, angle, result):
     n_in = np.sqrt(np.sum(v**2, axis=-1))
     n_out = np.sqrt(np.sum(out**2, axis=-1))
     axial = np.abs(out[..., dim] - v[..., dim])
-    tol = _C * _EPS * n_in
+    tol = _C * _eps_of(a, angle) * n_in
     trigger_if(np.any((np.abs(n_out - n_in) > tol) | (axial > tol)), "YT-ROT-002")
 
 
@@ -986,9 +1010,10 @@ def check_quat_to_matrix(quaternion, rot):
     if q.size != 4 or r.shape != (3, 3):
         return
     dev = abs(float(np.linalg.norm(q)) - 1.0)
-    if not np.isfinite(dev) or dev > 1e-12:
+    eps = _eps_of(quaternion, rot)
+    if not np.isfinite(dev) or dev > max(1e-12, 4.0 * eps):
         return
-    tol = 4 * _C * _EPS + 16.0 * dev
+    tol = 4 * _C * eps + 16.0 * dev
     orth = max(np.max(np.abs(r.T @ r - np.eye(3))), abs(np.linalg.det(r) - 1.0))
     q2 = np.asarray(rotation_matrix_to_quaternion(r), dtype=np.float64)
     sign = 1.0 if float(q @ q2) >= 0 else -1.0
@@ -1005,9 +1030,10 @@ def check_matrix_to_quat(rot, quaternion):
     if r.shape != (3, 3) or q.size != 4 or not np.all(np.isfinite(r)):
         return
     dev = max(np.max(np.abs(r.T @ r - np.eye(3))), abs(np.linalg.det(r) - 1.0))
-    if dev > 1e-12:
+    eps = _eps_of(rot, quaternion)
+    if dev > max(1e-12, 4.0 * eps):
         return
-    tol = 4 * _C * _EPS + 16.0 * dev
+    tol = 4 * _C * eps + 16.0 * dev
     unit = abs(float(np.linalg.norm(q)) - 1.0)
     back = np.max(np.abs(quaternion_to_rotation_matrix(q) - r))
     trigger_if(max(unit, back) > tol, "YT-ROT-003")
@@ -1021,7 +1047,9 @@ def check_modify_frame(com, l_in, p_in, v_in, l_out, p_out, v_out):
     nl = float(np.linalg.norm(l0))
     if l0.shape != (3,) or not np.isfinite(nl) or nl == 0 or not _range_ok(l0, _a(p_in) if p_in is not None else None, _a(v_in) if v_in is not None else None):
         return
-    bad = np.max(np.abs(lo - np.array([0.0, 0.0, nl]))) > 1e-6 * nl
+    # the two arccos steps have conditioning ~eps/sin(angle) <= sqrt(eps) of the working precision of L
+    tol_align = max(1e-6, 2.0 * math.sqrt(_eps_of(l_in)))
+    bad = np.max(np.abs(lo - np.array([0.0, 0.0, nl]))) > tol_align * nl
     pc = vv = None
     if p_in is not None and p_out is not None:
         pc = _a(p_in - com)  # unit-aware difference: centre and positions may carry different units
@@ -1088,7 +1116,8 @@ def check_velocity_decomposition(com, l_in, p_in, v_in):
     v2 = np.sum(v**2, axis=1)
     good = np.isfinite(rot) & np.isfinite(rad) & np.isfinite(par) & (cyl > 1e-9 * scale)
     err = np.abs(rot**2 + rad**2 + par**2 - v2)
-    trigger_if(np.any((err > 4 * _C * _EPS * v2) & good), "YT-ROT-006")
+    tol = 4 * _C * _eps_of(p_in, v_in, l_in, com) * v2
+    trigger_if(np.any((err > tol) & good), "YT-ROT-006")
 
 
 @_guarded

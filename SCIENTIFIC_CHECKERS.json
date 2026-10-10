@@ -76,7 +76,7 @@
       "symbol": "Cosmology.comoving_transverse_distance"
     },
     {
-      "alarm": "`|d_A - d_A12| > 1e-6 (|term_1| + |term_2|)/(1+z_f)`",
+      "alarm": "`|d_A - d_A12| > 4e-4 (|term_1| + |term_2|)/(1+z_f)` (the tolerance floor 4/bins, bins = 10000, absorbs the first-order error of yt's `trapezoid_int`, ~1e-4; precision-level quadrature error is not a target)",
       "family": "angular_diameter_two_redshift",
       "id": "YT-COS-007",
       "invariant": "`d_A12 = [D_M2 sqrt(1 + Ok D_M1^2/D_H^2) - D_M1 sqrt(1 + Ok D_M2^2/D_H^2)]/(1+z_f)` with `D_M1, D_M2` the transverse comoving distances from `z=0` to `z_i, z_f` evaluated by the checker's own quadrature of `1/E(z)` (flat: `(chi_f - chi_i)/(1+z_f)`)",
@@ -100,7 +100,7 @@
       "symbol": "Cosmology.luminosity_distance"
     },
     {
-      "alarm": "relative difference `> 1e-5` (quadrature ~1e-10, yt trapezoid ~4e-8, margin for sinh/sin cancellations)",
+      "alarm": "relative difference `> 1.2e-3` (tolerance floor 12/bins, bins = 10000: V ~ D_C^3 triples the ~1e-4 first-order error of yt's `trapezoid_int`; precision-level quadrature error is not a target)",
       "family": "comoving_volume_shell_integral",
       "id": "YT-COS-009",
       "invariant": "`V_C(z_i, z_f) = 4 pi D_H int D_M(z)^2/E(z) dz` (Hogg eq. 28, full sky), evaluated with the checker's own nested quadrature",
@@ -124,7 +124,7 @@
       "symbol": "Cosmology.comoving_volume"
     },
     {
-      "alarm": "relative error `> 1e-9`",
+      "alarm": "relative error `> max(1e-9, 16 eps)` (eps of the redshift dtype; 1e-9 for float64)",
       "family": "dark_factor_eos_integral",
       "id": "YT-COS-011",
       "invariant": "for `w(a) = w_0 + w_a(1-a)`, `rho_DE(a)/rho_DE(1) = exp(3 int_a^1 (1+w(a'))/a' da')`, evaluated by Gauss-Legendre",
@@ -412,7 +412,7 @@
       "symbol": "quaternion_to_rotation_matrix/rotation_matrix_to_quaternion"
     },
     {
-      "alarm": "rigidity `> C eps (|P-CoM|, |V|)`; alignment `> 1e-6 |L|` (the angles are obtained with `arccos`, whose conditioning near 0 and pi is ~`sqrt(eps)`; P/T)",
+      "alarm": "rigidity `> C eps (|P-CoM|, |V|)`; alignment `> max(1e-6, 2 sqrt(eps)) |L|` with eps of the dtype of `L` (the angles are obtained with `arccos`, whose conditioning near 0 and pi is ~`sqrt(eps)`; P/T)",
       "family": "reference_frame_rigid_alignment",
       "id": "YT-ROT-004",
       "invariant": "`|P_out| = |P - CoM|` and `|V_out| = |V|` per datum (rigid), `(P_out x V_out) . L_out = ((P - CoM) x V) . L` (orientation preserving; the unit-aware difference `P - CoM` is used), and `L_out = |L| z-hat`",
