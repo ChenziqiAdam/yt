@@ -9,7 +9,7 @@
       "id": "YT-COS-001",
       "invariant": "`rho_crit(z) / E(z)^2 = 3 H0^2/(8 pi G)`, which the repository tabulates as `rho_crit_g_cm3_h2 * h^2` (`utilities/physical_ratios.py`)",
       "observation_point": "return of `critical_density`",
-      "precondition": "a Cosmology with finite density parameters, omega_matter > 0 and E(z)^2 > 0 on the interval (closed models: sqrt(|Omega_k|) D_C/D_H < pi/2, the first branch of the sine), any `z` with `E(z) > 0`, `H0 = h * 100 km/s/Mpc`",
+      "precondition": "a Cosmology with finite density parameters, omega_matter > 0 and E(z)^2 > 0 on the interval (closed models: sqrt(|Omega_k|) D_C/D_H < pi/2, the first branch of the sine), any `z` with `E(z) > 0` (integer-dtype `z`: only entries with `(1+|z|)^4` representable in that dtype), `H0 = h * 100 km/s/Mpc`",
       "rationale": "every overdensity field divides by this.",
       "scientific_quantity": "critical density of the Universe",
       "source": "yt/utilities/cosmology.py",

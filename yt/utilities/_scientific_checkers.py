@@ -256,6 +256,17 @@ def _zs(*zs, limit=64):
     return [np.atleast_1d(x).ravel() for x in b]
 
 
+def _int_powers_fit(z_raw, z):
+    """Per-entry mask: for integer-dtype redshifts the library evaluates (1+z)**3 and (1+z)**4 in the caller's
+    integer dtype, so only entries whose fourth power fits that dtype are meaningful. All-True otherwise."""
+    zd = getattr(getattr(z_raw, "d", z_raw), "dtype", None)
+    if zd is None:
+        zd = np.asarray(z_raw).dtype
+    if np.issubdtype(zd, np.integer):
+        return (1.0 + np.abs(z)) ** 4 <= float(np.iinfo(zd).max)
+    return np.ones(np.shape(z), dtype=bool)
+
+
 def _chi(co, z):
     """Dimensionless line-of-sight comoving distance int_0^z dz'/E for one redshift (checker's quadrature)."""
     if z <= 0:
@@ -296,7 +307,7 @@ def check_critical_density(co, z, result):
     e = np.asarray(co.expansion_factor(z), dtype=np.float64)
     rho = np.atleast_1d(_val(result, "g/cm**3"))
     h = _h0_kms_mpc(co) / 100.0
-    good = np.isfinite(e) & (e > 0) & np.isfinite(rho)
+    good = np.isfinite(e) & (e > 0) & np.isfinite(rho) & _int_powers_fit(z_raw, z)
     if not good.any():
         return
     ratio = rho[good] / e[good] ** 2 / (rho_crit_g_cm3_h2 * h**2)
