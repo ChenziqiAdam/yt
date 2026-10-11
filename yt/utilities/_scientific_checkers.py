@@ -199,6 +199,8 @@ def _range_ok(*arrays):
             fi = np.finfo(dt)
             lo = max(lo, math.sqrt(float(fi.tiny) / float(fi.eps)))
             hi = min(hi, math.sqrt(float(fi.max) / 3.0) / 16.0)
+        elif dt is not None and np.issubdtype(dt, np.integer):
+            hi = min(hi, math.sqrt(float(np.iinfo(dt).max) / 12.0))  # (2|x|)^2 summed over 3 axes fits the int dtype
         a = np.abs(np.asarray(raw, dtype=np.float64))
         a = a[np.isfinite(a) & (a > 0)]
         if a.size and (a.min() < lo or a.max() > hi):
@@ -289,6 +291,7 @@ def check_critical_density(co, z, result):
         return
     from yt.utilities.physical_ratios import rho_crit_g_cm3_h2
 
+    z_raw = z
     (z,) = _zs(z)
     e = np.asarray(co.expansion_factor(z), dtype=np.float64)
     rho = np.atleast_1d(_val(result, "g/cm**3"))
@@ -297,7 +300,8 @@ def check_critical_density(co, z, result):
     if not good.any():
         return
     ratio = rho[good] / e[good] ** 2 / (rho_crit_g_cm3_h2 * h**2)
-    trigger_if(np.any(np.abs(ratio - 1.0) > 2e-6), "YT-COS-001")
+    tol = max(2e-6, 16.0 * _eps_of(z_raw))  # E^2 is evaluated in z's dtype (float16: ~1e-3)
+    trigger_if(np.any(np.abs(ratio - 1.0) > tol), "YT-COS-001")
 
 
 @_guarded
@@ -885,7 +889,10 @@ def check_periodic_dist(a, b, period, periodicity, result):
     if per.size != 3:
         return
     per = per.reshape((3,) + (1,) * (a.ndim - 1))
-    diff = np.abs(a - b)
+    if dt_ab.kind == "i":  # exact integer separation: a float64 cast of |x| > 2^53 would round
+        diff = np.abs(np.asarray(a_in, dtype=np.int64) - np.asarray(b_in, dtype=np.int64)).astype(np.float64)
+    else:
+        diff = np.abs(a - b)
     if np.any(diff > per) or len(periodicity) != 3:
         return
     p = np.array(periodicity, dtype=bool).reshape((3,) + (1,) * (a.ndim - 1))
