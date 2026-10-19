@@ -244,12 +244,12 @@
       "symbol": "four_velocity_t"
     },
     {
-      "alarm": "relative difference `> 1e-10`",
+      "alarm": "relative difference `> max(1e-10, 16 eps)`, eps of the narrowest floating dtype among `current_redshift` and the two fields (float32 redshifts are evaluated in float32)",
       "family": "overdensity_normalization_consistency",
       "id": "YT-FLD-007",
       "invariant": "`overdensity = matter_overdensity * Omega_m(z)`, `Omega_m(z) = Om (1+z)^3 / E(z)^2` (same matter density, two normalizations)",
       "observation_point": "return of `_matter_overdensity` (checker evaluates `overdensity`)",
-      "precondition": "cosmological dataset whose `ds.cosmology` densities equal `ds.omega_*`",
+      "precondition": "cosmological dataset whose `ds.cosmology` densities equal `ds.omega_*`; an integer-dtype `current_redshift` whose `(1+z)^3` exceeds the dtype range is out of scope",
       "rationale": "halo and clustering analyses switch between the two.",
       "scientific_quantity": "matter overdensity",
       "source": "yt/fields/cosmology_fields.py",
@@ -388,7 +388,7 @@
       "symbol": "get_rotation_matrix"
     },
     {
-      "alarm": "`> C eps |a|`",
+      "alarm": "`> C eps |a|`, eps of the narrowest floating dtype of `a` and `angle`; an integer `angle` counts as the dtype numpy evaluates its cos/sin in (int8 -> float16, int16 -> float32)",
       "family": "axis_rotation_invariants",
       "id": "YT-ROT-002",
       "invariant": "`|R a| = |a|` and the `dim` component is unchanged",

@@ -127,6 +127,32 @@ def _eps_of(*xs):
     return eps
 
 
+def _narrow_dtype_eps(*xs, terms=1.0, power=1, offset=0.0, ufunc_inputs=()):
+    """Shared narrow-dtype policy: working epsilon of the inputs, or None to skip.
+
+    None when an input has a fixed-width integer dtype in which the library's own arithmetic can wrap,
+    estimated as ``terms * (offset + max|x|) ** power`` beyond ``iinfo(dtype).max`` (e.g. offset=1, power=3
+    for ``(1+z)**3``): wrap-around is a dtype artefact, not a law violation. Otherwise ``_eps_of(*xs)``, so
+    float32/float16 inputs stay checked with a tolerance scaled by the narrowest floating dtype.
+    ``ufunc_inputs`` are inputs production passes through a floating ufunc (np.cos, np.sqrt): numpy evaluates
+    integer dtypes there in ``result_type(dtype, float16)`` (int8 -> float16, int16 -> float32).
+    """
+    for x in xs:
+        if x is None:
+            continue
+        v = np.asarray(getattr(x, "d", x))
+        if np.issubdtype(v.dtype, np.integer) and v.size:
+            peak = float(np.max(np.abs(v.astype(np.float64))))
+            if terms * (offset + peak) ** power > float(np.iinfo(v.dtype).max):
+                return None
+    eps = _eps_of(*xs)
+    for x in ufunc_inputs:
+        dt = np.asarray(getattr(x, "d", x)).dtype
+        if np.issubdtype(dt, np.integer):
+            eps = max(eps, float(np.finfo(np.result_type(dt, np.float16)).eps))
+    return eps
+
+
 _PRIVATE_REGISTRY = None
 
 
@@ -744,12 +770,19 @@ def check_overdensity_normalization(data, ftype, result):
             return
     z = float(ds.current_redshift)
     om_z = co.omega_matter * (1.0 + z) ** 3 / float(co.expansion_factor(z)) ** 2
-    od = _a(_fetch(data, (ftype, "overdensity")))
+    od_raw = _fetch(data, (ftype, "overdensity"))
+    od = _a(od_raw)
     md = _a(result)
     if od.shape != md.shape:
         return
+    # production evaluates (1+z)**3 and E(z)**2 in current_redshift's dtype (round 12: float32 z gave a
+    # 5.6e-8 = 0.5 eps32 mismatch); scale like YT-COS-001 (16 eps), skip integer z whose cube wraps
+    eps = _narrow_dtype_eps(ds.current_redshift, od_raw, result, power=3, offset=1.0)
+    if eps is None:
+        return
+    tol = max(1e-10, 16.0 * eps)
     good = np.isfinite(od) & np.isfinite(md) & (md != 0)
-    trigger_if(np.any((np.abs(od - md * om_z) > 1e-10 * np.abs(od)) & good), "YT-FLD-007")
+    trigger_if(np.any((np.abs(od - md * om_z) > tol * np.abs(od)) & good), "YT-FLD-007")
 
 
 def _fetch(data, key):
@@ -1043,7 +1076,9 @@ def check_rotate_vector(a, dim, angle, result):
     n_in = np.sqrt(np.sum(v**2, axis=-1))
     n_out = np.sqrt(np.sum(out**2, axis=-1))
     axial = np.abs(out[..., dim] - v[..., dim])
-    tol = _C * _eps_of(a, angle) * n_in
+    # an integer angle makes np.cos/np.sin run in float16 (int8) / float32 (int16), so the rotation matrix is
+    # orthogonal only to that eps (round-12 audit: int8 angle -> |n_out-n_in| ~ 1e-3*|v|)
+    tol = _C * _narrow_dtype_eps(a, angle, ufunc_inputs=(angle,)) * n_in
     trigger_if(np.any((np.abs(n_out - n_in) > tol) | (axial > tol)), "YT-ROT-002")
 
 
