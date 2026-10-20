@@ -293,6 +293,43 @@ def _int_powers_fit(z_raw, z):
     return np.ones(np.shape(z), dtype=bool)
 
 
+def _z_working_eps(co, *zs):
+    """Working epsilon of yt's ``trapezoid_int`` for these redshifts, or None for a dtype artefact.
+
+    ``log10(1 + z)``, the 10000-node grid and the integrand run in the redshift's dtype (integers go through
+    ``np.log10``: int8 -> float16, int16 -> float32), so a narrow redshift fixes the quadrature's precision.
+    None when ``1 + z`` wraps or ``E(z)`` overflows in that working dtype (float16 with radiation: ``21**4 > 65504``).
+    """
+    eps = _narrow_dtype_eps(*zs, offset=1.0, ufunc_inputs=zs)
+    if eps is None or eps <= _EPS:
+        return eps
+    wd = np.float16 if eps >= float(np.finfo(np.float16).eps) else np.float32
+    zz = np.concatenate([np.ravel(_a(z)) for z in zs]).astype(wd)
+    if not np.all(np.isfinite(np.asarray(co.expansion_factor(zz), dtype=np.float64))):
+        return None
+    return eps
+
+
+def _trap_budget(f, eps_w, zs, integral):
+    """Extra absolute error of yt's ``trapezoid_int`` of ``f`` run in working epsilon ``eps_w`` (round 15).
+
+    Rounding ``log10(1+z)`` and ``10**x`` moves an endpoint by about ``eps_w (1+z)(1+ln(1+z))`` (weight ``|f(z)|``),
+    and each integrand value carries a few ``eps_w`` (``E^2`` sums a fourth power, then sqrt and a division), so
+    ``4 eps_w (sum_ends + |I|)``. Measured float16/float32/int8/int16 deviations from the float64 result stay below
+    0.1 of this budget (flat, open, EdS, radiation models, z in [1e-12, 1e3]). Zero for float64 redshifts.
+    """
+    if eps_w is None or eps_w <= _EPS:
+        return 0.0
+    ends = sum((1.0 + z) * (1.0 + math.log1p(z)) * abs(float(f(z))) for z in zs)
+    return 4.0 * eps_w * (ends + abs(integral))
+
+
+def _z_scalars(n, *zs):
+    """Per-entry redshift scalars in the caller's dtype, so that checker re-calls neither truncate nor promote it."""
+    raw = np.broadcast_arrays(*[np.asarray(getattr(z, "d", z)) for z in zs])
+    return [r.reshape(-1)[:n] for r in raw]
+
+
 def _chi(co, z):
     """Dimensionless line-of-sight comoving distance int_0^z dz'/E for one redshift (checker's quadrature)."""
     if z <= 0:
@@ -365,13 +402,18 @@ def check_lookback_time(co, z_i, z_f, result):
     res = np.atleast_1d(_val(result, "s"))
     if res.size != zi.size:
         return
+    eps_w = _z_working_eps(co, z_i, z_f)  # round 15: float16/int8 redshifts run the quadrature in float16
+    if eps_w is None:
+        return
+    t_h = 1.0 / float(_val(co.hubble_constant, "1/s"))
     for k in np.nonzero(keep)[0]:
         e = co.expansion_factor(np.array([zi[k], zf[k]]))
         if not np.all(np.isfinite(e)) or np.any(e <= 0):
             continue
         t_i = float(_val(co.t_from_z(zi[k]), "s"))
         t_f = float(_val(co.t_from_z(zf[k]), "s"))
-        trigger_if(abs(res[k] - (t_i - t_f)) > 5e-5 * abs(t_i), "YT-COS-003")
+        extra = t_h * _trap_budget(co.age_integrand, eps_w, (zi[k], zf[k]), (t_i - t_f) / t_h)
+        trigger_if(abs(res[k] - (t_i - t_f)) > 5e-5 * abs(t_i) + extra, "YT-COS-003")
 
 
 @_guarded
@@ -447,6 +489,9 @@ def check_angular_diameter(co, z_i, z_f, result):
         return
     d_h = 299792.458 / _h0_kms_mpc(co)
     ok = co.omega_curvature
+    eps_w = _z_working_eps(co, z_i, z_f)
+    if eps_w is None:
+        return
     for k in range(zi.size):
         if not (0 <= zi[k] < zf[k] <= 1e4):
             continue
@@ -459,6 +504,11 @@ def check_angular_diameter(co, z_i, z_f, result):
         expected = d_h * (t1 - t2) / (1.0 + zf[k])
         # yt integrates 1/E with trapezoid_int (first-order, relative error ~1e-4 at the default bins): allow 4/bins
         tol = max(1e-6, 4.0 / _YT_TRAP_BINS) * d_h * (abs(t1) + abs(t2)) / (1.0 + zf[k])
+        # round 15: each D_M(0, z) in a narrow redshift dtype (dD_M/dD_C = sqrt(1 + Ok m^2))
+        for z, c, m in ((zi[k], c1, m1), (zf[k], c2, m2)):
+            if z > 0:
+                b = _trap_budget(co.inverse_expansion_factor, eps_w, (0.0, z), c)
+                tol += d_h * math.sqrt(abs(1.0 + ok * m**2)) * b / (1.0 + z)
         trigger_if(abs(res[k] - expected) > tol, "YT-COS-007")
 
 
@@ -474,14 +524,19 @@ def check_luminosity_reciprocity(co, z_i, z_f, result):
     res = np.atleast_1d(_val(result, "Mpc"))
     if res.size != zi.size:
         return
+    eps_w = _z_working_eps(co, z_i, z_f)
+    if eps_w is None:
+        return
+    zi_n, zf_n = _z_scalars(zi.size, z_i, z_f)  # round 15: re-call d_A in the caller's redshift dtype
     for k in range(zi.size):
         if not (0 <= zi[k] < zf[k]):
             continue
-        d_a = float(_val(co.angular_diameter_distance(zi[k], zf[k]), "Mpc"))
+        d_a = float(_val(co.angular_diameter_distance(zi_n[k], zf_n[k]), "Mpc"))
         d_m2 = float(_val(co.comoving_transverse_distance(0, zf[k]), "Mpc"))
         d_m1 = float(_val(co.comoving_transverse_distance(0, zi[k]), "Mpc"))
         r2 = ((1.0 + zf[k]) / (1.0 + zi[k])) ** 2
-        tol = 1e-9 * (abs(d_m2) * (1.0 + zf[k]) + abs(d_m1) * (1.0 + zi[k]))
+        # production forms (1 + z) in the redshift's dtype: a few eps_w per term on top of the float64 round-off
+        tol = max(1e-9, 4.0 * eps_w) * (abs(d_m2) * (1.0 + zf[k]) + abs(d_m1) * (1.0 + zi[k]))
         trigger_if(abs(res[k] - r2 * d_a) > tol, "YT-COS-008")
 
 
@@ -522,6 +577,9 @@ def check_volume_integral(co, z_i, z_f, result):
     res = np.atleast_1d(_val(result, "Mpc**3"))
     if res.size != zi.size:
         return
+    eps_w = _z_working_eps(co, z_i, z_f)
+    if eps_w is None:
+        return
     for k in range(zi.size):
         if not (0 <= zi[k] < zf[k] <= 20.0):
             continue
@@ -529,7 +587,21 @@ def check_volume_integral(co, z_i, z_f, result):
         if v is None or not np.isfinite(v) or v <= 0:
             continue
         # V ~ D_C^3 on the flat branch: 3x the D_C quadrature error of yt's trapezoid_int; allow 12/bins
-        trigger_if(abs(res[k] / v - 1.0) > 12.0 / _YT_TRAP_BINS, "YT-COS-009")
+        tol = 12.0 / _YT_TRAP_BINS * v + _volume_dtype_budget(co, eps_w, zi[k], zf[k])
+        trigger_if(abs(res[k] - v) > tol, "YT-COS-009")
+
+
+def _volume_dtype_budget(co, eps_w, z_i, z_f):
+    """Round 15: absolute volume error (Mpc^3) when yt's single trapezoid_int over [z_i, z_f] runs in eps_w.
+
+    dV = 4 pi D_M^2 dD_M / sqrt(1 + Ok (D_M/D_H)^2) and dD_M = sqrt(1 + Ok m^2) dD_C, so the square roots cancel.
+    """
+    if eps_w is None or eps_w <= _EPS:
+        return 0.0
+    d_h = 299792.458 / _h0_kms_mpc(co)
+    chi = _chi(co, z_f) - _chi(co, z_i)
+    b = _trap_budget(co.inverse_expansion_factor, eps_w, (z_i, z_f), chi)
+    return 4.0 * math.pi * (d_h * _m_of_chi(co, chi)) ** 2 * d_h * b
 
 
 @_guarded
@@ -544,17 +616,25 @@ def check_volume_additivity(co, z_i, z_f, result):
     res = np.atleast_1d(_val(result, "Mpc**3"))
     if res.size != zi.size:
         return
+    eps_w = _z_working_eps(co, z_i, z_f)
+    if eps_w is None:
+        return
+    zi_n, zf_n = _z_scalars(zi.size, z_i, z_f)  # round 15: re-calls keep the caller's redshift dtype
     for k in range(zi.size):
         if not (0 <= zi[k] < zf[k] <= 20.0):
             continue
         if not _closed_branch_ok(co, _chi(co, zf[k])):
             continue
-        zm = math.sqrt((1.0 + zi[k]) * (1.0 + zf[k])) - 1.0
-        v1 = float(_val(co.comoving_volume(zi[k], zm), "Mpc**3"))
-        v2 = float(_val(co.comoving_volume(zm, zf[k]), "Mpc**3"))
+        zm_n = np.asarray(math.sqrt((1.0 + zi[k]) * (1.0 + zf[k])) - 1.0).astype(zf_n.dtype)[()]
+        zm = float(zm_n)  # additivity holds at any split point; the dtype-rounded one must stay inside
+        if not (zi[k] < zm < zf[k]):
+            continue
+        v1 = float(_val(co.comoving_volume(zi_n[k], zm_n), "Mpc**3"))
+        v2 = float(_val(co.comoving_volume(zm_n, zf_n[k]), "Mpc**3"))
         if not (np.isfinite(v1) and np.isfinite(v2)) or res[k] == 0:
             continue
-        trigger_if(abs((v1 + v2) / res[k] - 1.0) > 1e-6, "YT-COS-010")
+        extra = sum(_volume_dtype_budget(co, eps_w, a, b) for a, b in ((zi[k], zm), (zm, zf[k]), (zi[k], zf[k])))
+        trigger_if(abs(v1 + v2 - res[k]) > 1e-6 * abs(res[k]) + extra, "YT-COS-010")
 
 
 @_guarded
@@ -1111,6 +1191,8 @@ def check_matrix_to_quat(rot, quaternion):
     q = np.asarray(quaternion, dtype=np.float64).ravel()
     if r.shape != (3, 3) or q.size != 4 or not np.all(np.isfinite(r)):
         return
+    if np.asarray(rot).dtype.kind == "u":
+        return  # round 15: m11 - m22 - m33 wraps in an unsigned dtype (dtype artefact, as YT-GEO-005)
     dev = max(np.max(np.abs(r.T @ r - np.eye(3))), abs(np.linalg.det(r) - 1.0))
     eps = _eps_of(rot, quaternion)
     if dev > max(1e-12, 4.0 * eps):
