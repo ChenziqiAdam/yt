@@ -270,6 +270,38 @@ def _age_table_resolved(co):
     return bool(np.all(np.isfinite(e2)) and float(np.min(e2)) >= _E2_MIN_AGE)
 
 
+_AGE_TOL = 5e-5  # relative tolerance of the age laws YT-COS-003 / YT-COS-004
+
+
+def _age_table(co, lo, hi, per_dex):
+    """yt's age table (``t_from_a`` / ``a_from_t``): cumulative trapezoid of ``age_integrand`` in z on a log10(a) grid."""
+    x = np.linspace(lo, hi, int(round((hi - lo) * per_dex)) + 1)
+    z = 1.0 / np.power(10.0, x) - 1.0
+    f = np.asarray(co.age_integrand(z), dtype=np.float64)
+    with np.errstate(all="ignore"):
+        return x[1:], np.log10(-np.cumsum(0.5 * (f[:-1] + f[1:]) * np.diff(z)))
+
+
+def _age_table_error(co, la):
+    """Relative error of yt's 1000 bins/dex age table at log10(a) = ``la`` (round 16), estimated against the same
+    table refined 4x (trapezoid and linear-interpolation errors are O(h^2), so the refined table is ~16x closer).
+
+    A sharp minimum of E^2 (e.g. Om ~ 1e3 with Ok ~ -1.5 Om: width ~ 1/sqrt(1.5 Om) in ln a) is not resolved by
+    1000 bins/dex even when min E^2 passes the ``_E2_MIN_AGE`` gate; the table itself is then off by 1e-4 - 1e-3,
+    so a checker using it as reference cannot meet ``_AGE_TOL``. Realistic models (flat/open/closed LCDM, radiation,
+    w0waCDM) give ~4e-6. The max over the interpolated value and its two bracketing nodes keeps an accidental
+    cancellation of the two error terms from hiding an unresolved table. NaN where E is not real (treated as unresolved).
+    """
+    la = np.atleast_1d(np.asarray(la, dtype=np.float64))
+    lo, hi = min(-6.0, math.floor(la.min()) - 3.0), math.ceil(la.max()) + 1.0
+    xc, tc = _age_table(co, lo, hi, 1000)
+    xf, tf = _age_table(co, lo, hi, 4000)
+    e_int = np.abs(np.interp(la, xc, tc) - np.interp(la, xf, tf))
+    i = np.clip(np.searchsorted(xc, la), 1, xc.size - 1)
+    e_node = np.maximum(np.abs(tc[i] - tf[4 * i + 3]), np.abs(tc[i - 1] - tf[4 * i - 1]))  # xf[4i+3] == xc[i]
+    return math.log(10.0) * np.maximum(e_int, e_node)
+
+
 def _h0_kms_mpc(co):
     return float(_val(co.hubble_constant, "km/s/Mpc"))
 
@@ -406,14 +438,21 @@ def check_lookback_time(co, z_i, z_f, result):
     if eps_w is None:
         return
     t_h = 1.0 / float(_val(co.hubble_constant, "1/s"))
-    for k in np.nonzero(keep)[0]:
+    idx = np.nonzero(keep)[0]
+    if idx.size:  # round 16: reference ages from yt's table must be resolved to 0.2 of the tolerance
+        err_i = _age_table_error(co, -np.log10(1.0 + zi[idx]))
+        err_f = _age_table_error(co, -np.log10(1.0 + zf[idx]))
+    for n, k in enumerate(idx):
         e = co.expansion_factor(np.array([zi[k], zf[k]]))
         if not np.all(np.isfinite(e)) or np.any(e <= 0):
             continue
         t_i = float(_val(co.t_from_z(zi[k]), "s"))
         t_f = float(_val(co.t_from_z(zf[k]), "s"))
+        bound = 0.2 * _AGE_TOL * abs(t_i)
+        if not (err_i[n] * abs(t_i) <= bound and err_f[n] * abs(t_f) <= bound):  # NaN error: unresolved
+            continue
         extra = t_h * _trap_budget(co.age_integrand, eps_w, (zi[k], zf[k]), (t_i - t_f) / t_h)
-        trigger_if(abs(res[k] - (t_i - t_f)) > 5e-5 * abs(t_i) + extra, "YT-COS-003")
+        trigger_if(abs(res[k] - (t_i - t_f)) > _AGE_TOL * abs(t_i) + extra, "YT-COS-003")
 
 
 @_guarded
@@ -426,9 +465,11 @@ def check_age_inverse(co, t, a_result):
     if a.size > 256 or a.size != tt.size:
         return
     keep = np.isfinite(a) & (a >= 1e-2) & (a <= 10.0)
+    if keep.any():  # round 16: both tables (t_from_a, inverted a_from_t) resolved to 0.2 of the tolerance at a
+        keep[keep] = _age_table_error(co, np.log10(a[keep])) <= 0.2 * _AGE_TOL
     for k in np.nonzero(keep)[0]:
         t2 = float(_val(co.t_from_a(a[k]), "s"))
-        trigger_if(abs(t2 / tt[k] - 1.0) > 5e-5, "YT-COS-004")
+        trigger_if(abs(t2 / tt[k] - 1.0) > _AGE_TOL, "YT-COS-004")
 
 
 @_guarded
