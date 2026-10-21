@@ -179,6 +179,10 @@ def _val(q, unit):
             unit = Unit(unit, registry=q.units.registry)
         else:
             unit = _unit(unit)
+    dt = getattr(q, "dtype", None)
+    if dt is not None and dt.kind == "f" and dt.itemsize < 8:
+        # round 18: convert in float64; unyt converts in the array's dtype, so 1 Gyr in float16 became inf seconds
+        q = q.astype(np.float64)
     return np.asarray(q.to_value(unit), dtype=np.float64)
 
 
@@ -464,7 +468,7 @@ def check_age_inverse(co, t, a_result):
     tt = np.atleast_1d(_val(t, "s") if hasattr(t, "to_value") else _a(t))
     if a.size > 256 or a.size != tt.size:
         return
-    keep = np.isfinite(a) & (a >= 1e-2) & (a <= 10.0)
+    keep = np.isfinite(a) & (a >= 1e-2) & (a <= 10.0) & np.isfinite(tt) & (tt > 0)  # round 18: finite reference
     if keep.any():  # round 16: both tables (t_from_a, inverted a_from_t) resolved to 0.2 of the tolerance at a
         keep[keep] = _age_table_error(co, np.log10(a[keep])) <= 0.2 * _AGE_TOL
     for k in np.nonzero(keep)[0]:
@@ -1009,7 +1013,10 @@ def check_cyl_parseval(vectors, theta, normal):
         get_cyl_theta_component(vectors, theta, normal),
         get_cyl_z_component(vectors, normal),
     ]
-    _basis_components_norm(vectors, comps, "YT-GEO-003", _eps_of(vectors, theta, normal))
+    # round 18: an integer angle makes np.cos/np.sin run in float16 (int8) / float32 (int16), as YT-ROT-002
+    eps = _narrow_dtype_eps(vectors, theta, normal, ufunc_inputs=(theta,))
+    if eps is not None:
+        _basis_components_norm(vectors, comps, "YT-GEO-003", eps)
 
 
 @_guarded
@@ -1029,7 +1036,9 @@ def check_sph_parseval(vectors, theta, phi, normal):
         get_sph_theta_component(vectors, theta, phi, normal),
         get_sph_phi_component(vectors, phi, normal),
     ]
-    _basis_components_norm(vectors, comps, "YT-GEO-004", _eps_of(vectors, theta, phi, normal))
+    eps = _narrow_dtype_eps(vectors, theta, phi, normal, ufunc_inputs=(theta, phi))  # round 18: as YT-GEO-003
+    if eps is not None:
+        _basis_components_norm(vectors, comps, "YT-GEO-004", eps)
 
 
 @_guarded
@@ -1180,7 +1189,11 @@ def check_rotation_matrix(theta, rot_vector, rot):
     eps = _eps_of(theta, rot_vector, rot)
     if a.size != 3 or not np.isfinite(norm) or abs(norm - 1.0) > max(1e-12, 4.0 * eps) or r.shape != (3, 3):
         return
-    tol = _C * eps + 8.0 * abs(norm - 1.0)
+    # round 18: R is float64, but an integer theta makes its cos/sin float16 (int8) / float32 (int16), as YT-ROT-002
+    eps_w = _narrow_dtype_eps(theta, rot_vector, rot, ufunc_inputs=(theta,))
+    if eps_w is None:
+        return
+    tol = _C * eps_w + 8.0 * abs(norm - 1.0)
     orth = np.max(np.abs(r.T @ r - np.eye(3)))
     det = abs(np.linalg.det(r) - 1.0)
     axis = np.max(np.abs(r @ a - a))

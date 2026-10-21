@@ -280,7 +280,7 @@
       "symbol": "get_sph_phi"
     },
     {
-      "alarm": "`> C eps |v|^2`",
+      "alarm": "`> C eps |v|^2`, eps of the narrowest floating dtype of `vectors`, `theta` and `normal`; an integer `theta` counts as the dtype numpy evaluates its cos/sin in (int8 -> float16, int16 -> float32)",
       "family": "cylindrical_basis_parseval",
       "id": "YT-GEO-003",
       "invariant": "`v_R^2 + v_theta^2 + v_z^2 = |v|^2` (orthonormal basis)",
@@ -292,7 +292,7 @@
       "symbol": "get_cyl_{r,theta,z}_component"
     },
     {
-      "alarm": "`> C eps |v|^2`",
+      "alarm": "`> C eps |v|^2`, eps of the narrowest floating dtype of `vectors`, `theta`, `phi` and `normal`; an integer `theta` or `phi` counts as the dtype numpy evaluates its cos/sin in (int8 -> float16, int16 -> float32)",
       "family": "spherical_basis_parseval",
       "id": "YT-GEO-004",
       "invariant": "`v_r^2 + v_theta^2 + v_phi^2 = |v|^2` (orthonormal basis)",
@@ -376,7 +376,7 @@
       "symbol": "cell_volume"
     },
     {
-      "alarm": "any deviation `> C eps + 8 | |a|-1 |`",
+      "alarm": "any deviation `> C eps + 8 | |a|-1 |`, eps of the narrowest floating dtype of `theta`, `rot_vector` and `R`; an integer `theta` counts as the dtype numpy evaluates its cos/sin in (int8 -> float16, int16 -> float32)",
       "family": "rotation_matrix_proper",
       "id": "YT-ROT-001",
       "invariant": "`R^T R = I`, `det R = 1`, `R a = a`",
